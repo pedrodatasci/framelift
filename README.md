@@ -4,7 +4,7 @@
 
 **Upscale and restore videos with Real-ESRGAN — on an NVIDIA GPU if you have one, on any CPU if you don't.**
 
-[![Tests](https://github.com/SEU_USUARIO/framelift/actions/workflows/tests.yml/badge.svg)](https://github.com/SEU_USUARIO/framelift/actions/workflows/tests.yml)
+[![Tests](https://github.com/pedrodatasci/framelift/actions/workflows/tests.yml/badge.svg)](https://github.com/pedrodatasci/framelift/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -86,7 +86,7 @@ You need **Python 3.9+** and **[FFmpeg](https://ffmpeg.org/download.html)** avai
 on your `PATH` (`ffmpeg -version` should work in a terminal).
 
 ```bash
-git clone https://github.com/SEU_USUARIO/framelift.git
+git clone https://github.com/pedrodatasci/framelift.git
 cd framelift
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate

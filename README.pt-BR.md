@@ -4,7 +4,7 @@
 
 **Aumente a resolução e restaure vídeos com Real-ESRGAN: na GPU NVIDIA, se você tiver uma, ou em qualquer CPU, se não tiver.**
 
-[![Tests](https://github.com/SEU_USUARIO/framelift/actions/workflows/tests.yml/badge.svg)](https://github.com/SEU_USUARIO/framelift/actions/workflows/tests.yml)
+[![Tests](https://github.com/pedrodatasci/framelift/actions/workflows/tests.yml/badge.svg)](https://github.com/pedrodatasci/framelift/actions/workflows/tests.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -87,7 +87,7 @@ Você precisa de **Python 3.9+** e do **[FFmpeg](https://ffmpeg.org/download.htm
 `PATH` (o comando `ffmpeg -version` precisa funcionar no terminal).
 
 ```bash
-git clone https://github.com/SEU_USUARIO/framelift.git
+git clone https://github.com/pedrodatasci/framelift.git
 cd framelift
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate

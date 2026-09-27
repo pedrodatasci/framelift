@@ -37,7 +37,7 @@ examples:
   framelift -i in.mp4 -o part2.mp4 --start-frame 1201
 
 Press Ctrl+C once to stop early and still get a playable MP4 of what's done.
-Full documentation: https://github.com/SEU_USUARIO/framelift#readme
+Full documentation: https://github.com/pedrodatasci/framelift#readme
 """
 
 

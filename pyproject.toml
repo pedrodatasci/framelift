@@ -9,7 +9,7 @@ description = "Upscale and restore videos with Real-ESRGAN — GPU when you have
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
-authors = [{ name = "Seu Nome" }]
+authors = [{ name = "Pedro Sofiati de Sá" }]
 keywords = ["video", "upscaling", "super-resolution", "real-esrgan", "restoration", "ffmpeg"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -40,8 +40,8 @@ dev = ["pytest>=7", "ruff>=0.4"]
 framelift = "framelift.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/SEU_USUARIO/framelift"
-Issues = "https://github.com/SEU_USUARIO/framelift/issues"
+Homepage = "https://github.com/pedrodatasci/framelift"
+Issues = "https://github.com/pedrodatasci/framelift/issues"
 
 [tool.setuptools.dynamic]
 version = { attr = "framelift.__version__" }
