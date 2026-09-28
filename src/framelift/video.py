@@ -10,7 +10,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -61,6 +61,27 @@ def probe_video(path: str | Path) -> VideoInfo:
         )
 
     return VideoInfo(Path(path), fps, frame_count, width, height)
+
+
+def read_frames(path: str | Path, numbers: Iterable[int]) -> list[tuple[int, Frame]]:
+    """Read specific frames (1-based). Frames that can't be decoded are skipped."""
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        raise VideoReadError(f"Couldn't open the video: {path}")
+
+    frames = []
+    try:
+        for number in numbers:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, max(0, number - 1))
+            ok, image = capture.read()
+            if ok:
+                frames.append((number, image))
+    finally:
+        capture.release()
+
+    if not frames:
+        raise VideoReadError(f"Couldn't decode any frames from {path}")
+    return frames
 
 
 @dataclass(frozen=True)

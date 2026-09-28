@@ -77,3 +77,26 @@ def test_stop_event_saves_a_partial_video(make_video, tmp_path, options, monkeyp
     assert 1 <= result.frames_processed < 10
     assert result.resume_from == result.last_frame + 1
     assert probe_video(result.output_path).frame_count == result.frames_written
+
+
+def test_tune_video_recommends_runnable_settings(make_video, tmp_path, options):
+    from framelift import tune_video
+
+    report = tune_video(
+        make_video(frames=12), options, keep={"weights_dir"}, sheet_path=tmp_path / "s.png"
+    )
+
+    assert report.best_run is not None and report.estimated_seconds > 0
+    assert report.recommended.device == "cpu"
+    assert report.sheet_path.exists()
+    report.recommended.validate()
+
+
+def test_tune_video_respects_pinned_settings(make_video, options):
+    from framelift import tune_video
+
+    options.profile, options.scale = "heavy_noise", 2
+    report = tune_video(make_video(frames=12), options, keep={"profile", "scale"}, benchmark=False)
+
+    assert (report.recommended.profile, report.recommended.scale) == ("heavy_noise", 2)
+    assert report.runs == [] and report.estimated_seconds is None

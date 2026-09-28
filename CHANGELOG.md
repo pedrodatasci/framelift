@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-09-28
+
+### Added
+
+- **`framelift tune`**: finds good settings for a video on the current machine and ends
+  with a ready-to-run command.
+  - Speed settings are *measured*: a real frame of the video is upscaled with each
+    candidate tile size (plus FP16 on NVIDIA, double-checked against FP32 because FP16 is
+    slower on some older cards). Configurations that run out of memory are skipped. NVENC
+    is probed, and a rough total time estimate is shown.
+  - Look settings are *suggested*: a noise estimate (Immerkær's method, ignoring edges so
+    texture isn't mistaken for noise, calibrated on H.264 output) picks a profile, and the
+    resolution picks a scale that aims for Full HD without stretching more than 3x.
+  - A comparison sheet PNG shows the same 100% crop of the most detailed area with
+    different AI strengths and profiles, so taste is decided by eye.
+  - Any setting passed on the command line is kept as-is and carried into the command.
+    `--no-benchmark` skips the speed test on slow machines.
+- Python API: `tune_video()` and `TuneReport`, plus the torch-free helpers
+  `estimate_noise()` and `suggest_size()`.
+- `framelift.cli.format_command()` / `options_to_args()` turn `EnhanceOptions` back into
+  a command line.
+- The GitHub Actions workflow can also be started by hand ("Run workflow" button).
+
+### Unchanged
+
+- `framelift -i … -o …` and `python main.py …` behave exactly as before; enhanced output
+  is still bit-identical to the original script.
+
 ## [1.0.0] — 2026-09-26
 
 First release as a library. It is a restructuring of the original single-file

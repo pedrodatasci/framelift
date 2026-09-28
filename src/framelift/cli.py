@@ -36,6 +36,9 @@ examples:
   # Resume a run that stopped after frame 1200
   framelift -i in.mp4 -o part2.mp4 --start-frame 1201
 
+Not sure which settings to use? Let framelift measure and suggest them:
+  framelift tune -i clip.mp4
+
 Press Ctrl+C once to stop early and still get a playable MP4 of what's done.
 Full documentation: https://github.com/pedrodatasci/framelift#readme
 """
@@ -272,6 +275,33 @@ def options_from_args(args: argparse.Namespace) -> EnhanceOptions:
     return EnhanceOptions(**{name: getattr(args, name) for name in EnhanceOptions.field_names()})
 
 
+def options_to_args(options: EnhanceOptions) -> list[str]:
+    """The CLI flags that reproduce ``options`` (only those that differ from the defaults)."""
+    defaults = EnhanceOptions()
+    args: list[str] = []
+
+    for name in EnhanceOptions.field_names():
+        value, default = getattr(options, name), getattr(defaults, name)
+        if str(value) == str(default) or (name == "scale" and options.same_resolution):
+            continue
+
+        flag = "--" + name.replace("_", "-")
+        if isinstance(value, bool):
+            args.append(flag)  # every boolean option defaults to False
+        elif isinstance(value, float):
+            args += [flag, f"{value:g}"]
+        else:
+            args += [flag, str(value)]
+
+    return args
+
+
+def format_command(input_path, output_path, options: EnhanceOptions) -> str:
+    """A ready-to-paste ``framelift`` command line (works in bash and PowerShell)."""
+    parts = ["framelift", "-i", str(input_path), "-o", str(output_path), *options_to_args(options)]
+    return " ".join(f'"{part}"' if " " in part else part for part in parts)
+
+
 class GracefulInterrupt:
     """First Ctrl+C: finish the current frame and save. Second Ctrl+C: quit now."""
 
@@ -299,6 +329,12 @@ class GracefulInterrupt:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["tune"]:
+        from .tune_cli import main as tune_main
+
+        return tune_main(argv[1:])
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

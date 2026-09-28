@@ -63,3 +63,11 @@ def test_closing_early_does_not_hang(make_video):
     with reader:
         next(iter(reader))
     assert not reader._thread.is_alive()
+
+
+def test_read_frames_returns_the_requested_frames(make_video):
+    from framelift.video import read_frames
+
+    frames = read_frames(make_video(frames=10), [2, 7])
+    assert [number for number, _ in frames] == [2, 7]
+    assert frames[1][1].mean() == pytest.approx(70, abs=3)

@@ -39,3 +39,45 @@ def test_catalogs_print_and_exit_cleanly(flag, capsys):
     assert main([flag]) == 0
     out = capsys.readouterr().out
     assert "(default)" in out
+
+
+def test_options_to_args_round_trips():
+    from framelift.cli import options_to_args
+
+    options = EnhanceOptions(
+        scale=2.25, profile="old_tv", device="cpu", tile=128, half=True, x264_preset="medium"
+    )
+    args = build_parser().parse_args(["-i", "a", "-o", "b", *options_to_args(options)])
+    assert options_from_args(args) == options
+
+
+def test_default_options_need_no_flags():
+    from framelift.cli import options_to_args
+
+    assert options_to_args(EnhanceOptions()) == []
+
+
+def test_scale_is_dropped_with_same_resolution():
+    from framelift.cli import options_to_args
+
+    assert options_to_args(EnhanceOptions(same_resolution=True, scale=3)) == ["--same-resolution"]
+
+
+def test_format_command_quotes_paths_with_spaces():
+    from framelift.cli import format_command
+
+    command = format_command("my clip.mp4", "out.mp4", EnhanceOptions(tile=128))
+    assert command == 'framelift -i "my clip.mp4" -o out.mp4 --tile 128'
+
+
+def test_tune_is_dispatched_as_a_subcommand(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["tune", "--help"])
+    assert exc.value.code == 0
+    assert "comparison sheet" in capsys.readouterr().out
+
+
+def test_tune_requires_an_input():
+    with pytest.raises(SystemExit) as exc:
+        main(["tune"])
+    assert exc.value.code == 2

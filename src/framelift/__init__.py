@@ -16,8 +16,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
+from .analysis import estimate_noise, suggest_size
 from .console import setup_console
 from .errors import (
     BlackFrameError,
@@ -37,9 +38,15 @@ from .video import VideoInfo, probe_video
 
 if TYPE_CHECKING:  # pragma: no cover
     from .pipeline import VideoEnhancer, enhance_video
+    from .tuning import TuneReport, tune_video
 
 # Names that live in modules importing PyTorch; resolved on first access.
-_LAZY = {"enhance_video", "VideoEnhancer"}
+_LAZY = {
+    "enhance_video": "pipeline",
+    "VideoEnhancer": "pipeline",
+    "tune_video": "tuning",
+    "TuneReport": "tuning",
+}
 
 __all__ = [
     "__version__",
@@ -50,6 +57,10 @@ __all__ = [
     "EnhanceResult",
     "RunPlan",
     "plan_run",
+    "tune_video",
+    "TuneReport",
+    "estimate_noise",
+    "suggest_size",
     # catalogs
     "MODELS",
     "ModelSpec",
@@ -76,7 +87,8 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 def __getattr__(name: str):
     if name in _LAZY:
-        from . import pipeline
+        import importlib
 
-        return getattr(pipeline, name)
+        module = importlib.import_module(f".{_LAZY[name]}", __name__)
+        return getattr(module, name)
     raise AttributeError(f"module 'framelift' has no attribute '{name}'")

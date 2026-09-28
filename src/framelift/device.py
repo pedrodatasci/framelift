@@ -74,6 +74,13 @@ def configure_torch(cpu_threads: int = 0) -> None:
             pass  # very old PyTorch builds don't have these switches
 
 
+def gpu_memory_gb(device: Device) -> float | None:
+    """Total memory of the device's GPU in GB, or None on CPU."""
+    if not device.is_cuda:
+        return None
+    return torch.cuda.get_device_properties(device.gpu_id).total_memory / 1024**3
+
+
 def current_cpu_threads() -> int:
     return torch.get_num_threads()
 
