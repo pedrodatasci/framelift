@@ -18,8 +18,11 @@ log = logging.getLogger("framelift.cli")
 
 EXAMPLES = """\
 examples:
-  # Measure, suggest, and save a comparison sheet (clip_tune.png)
+  # Measure, suggest two presets (fast and best), save a comparison sheet
   framelift tune -i clip.mp4
+
+  # Animation: the "best" preset uses the anime model instead
+  framelift tune -i episode.mp4 --anime
 
   # You already know you want 2x and the old_tv look: tune everything else
   framelift tune -i vhs.mp4 --scale 2 --profile old_tv
@@ -28,7 +31,7 @@ examples:
   framelift tune -i clip.mp4 --no-benchmark
 
 Any setting you pass is kept as-is; everything else is measured or suggested.
-The command printed at the end is ready to copy and run.
+The commands printed at the end are ready to copy and run.
 """
 
 # Settings you can pin. Anything given on the command line is left untouched.
@@ -43,9 +46,9 @@ def build_tune_parser() -> argparse.ArgumentParser:
         prog="framelift tune",
         description=(
             "Find good settings for a video on this machine. Speed settings (device, "
-            "FP16, tile, encoder) are measured on real frames; look settings (profile, "
-            "scale) are suggested from the footage, and a comparison sheet shows the "
-            "options side by side. Ends with a ready-to-run command."
+            "FP16, tile, CPU threads, encoder) are measured on real frames. The AI "
+            "strength comes from measuring what the AI actually does to this footage. "
+            "Ends with two ready-to-run presets, fast and best, with time estimates."
         ),
         epilog=EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -60,8 +63,9 @@ def build_tune_parser() -> argparse.ArgumentParser:
 
     analysis = parser.add_argument_group("analysis")
     analysis.add_argument(
-        "--samples", type=int, default=3, metavar="N",
-        help="Frames spread across the video to inspect for noise and detail. (default: 3)",
+        "--samples", type=int, default=6, metavar="N",
+        help="Frames spread across the video to inspect for noise, softness and motion. "
+             "(default: 6)",
     )  # fmt: skip
     analysis.add_argument(
         "--sheet", metavar="PNG",
@@ -70,13 +74,25 @@ def build_tune_parser() -> argparse.ArgumentParser:
     analysis.add_argument("--no-sheet", action="store_true", help="Don't make a comparison sheet.")
     analysis.add_argument(
         "--no-benchmark", action="store_true",
-        help="Skip the speed test. Much faster on CPU, but no tile/FP16 tuning or time estimate.",
+        help="Skip the speed test. Much faster on CPU, but no tile/FP16/thread tuning and "
+             "no time estimates.",
+    )  # fmt: skip
+    analysis.add_argument(
+        "--no-best", action="store_true",
+        help="Only tune the fast preset: skips the heavier model (a 67 MB download the "
+             "first time) and its tests.",
+    )  # fmt: skip
+    analysis.add_argument(
+        "--anime", action="store_true",
+        help="The video is animation: the best preset uses realesrgan-x4plus-anime-6B.",
     )  # fmt: skip
 
     pinned = parser.add_argument_group(
         "settings to keep (anything you pass here is used as-is, not tuned)"
     )
-    pinned.add_argument("--model", choices=list(MODELS), help="Model to tune for.")
+    pinned.add_argument(
+        "--model", choices=list(MODELS), help="Tune only this model (no fast/best choice)."
+    )
     pinned.add_argument("--device", choices=DEVICES)
     pinned.add_argument("--gpu-id", type=int, metavar="ID")
     pinned.add_argument("--weights-dir", metavar="DIR")
@@ -121,6 +137,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             keep=pinned,
             samples=args.samples,
             benchmark=not args.no_benchmark,
+            try_best=not args.no_best,
+            content="anime" if args.anime else "live",
             sheet_path=sheet_path,
         )
     except KeyboardInterrupt:
@@ -145,7 +163,8 @@ def render_report(report, input_path, output_path, pinned=()) -> str:
     ``pinned`` holds the names of the settings the user chose themselves.
     """
     pinned = set(pinned)
-    video, plan, options = report.video, report.plan, report.recommended
+    video, plan = report.video, report.plan
+    options = report.presets["fast"].options
     yours = "  (yours)"
     lines = [""]
 
@@ -156,16 +175,17 @@ def render_report(report, input_path, output_path, pinned=()) -> str:
         machine = f"{report.device.name}{memory} · {encoder}"
     else:
         machine = "CPU (no NVIDIA GPU in use, so expect it to be slow)"
+        threads = options.torch_threads or report.default_threads
+        if report.default_threads and threads != report.default_threads:
+            machine += f"\n  {threads} CPU threads were faster than all {report.default_threads}"
     lines += ["Your machine", f"  {machine}", ""]
 
     # Video
     minutes, seconds = divmod(round(video.duration_seconds), 60)
     if "profile" in pinned:
-        profile_line = f"{options.profile}{yours}"
+        noise_line = f"profile {options.profile}{yours}"
     else:
-        profile_line = (
-            f"{report.noise_label} (noise {report.noise:.1f}) → profile {options.profile}"
-        )
+        noise_line = f"{report.noise_label} ({report.noise:.1f}) → profile {options.profile}"
     if pinned & {"scale", "same_resolution"}:
         size_line = f"{plan.width}x{plan.height}{yours}"
     elif report.size.same_resolution:
@@ -176,41 +196,86 @@ def render_report(report, input_path, output_path, pinned=()) -> str:
         "Your video",
         f"  {video.path.name}  {video.width}x{video.height} @ {video.fps:.3f} fps, "
         f"{video.frame_count:,} frames ({minutes}m{seconds:02d}s)",
-        f"  Look   {profile_line}",
-        f"  Size   {size_line}",
+        f"  Softness  {report.softness_label} ({report.softness:.2f})",
+        f"  Noise     {noise_line}",
+        f"  Size      {size_line}",
+        f"  Tested on frame {report.sample_frame} (the sharpest steady one)",
         "",
     ]
 
-    # Speed
-    lines.append(f"Speed ({options.model}, {plan.width}x{plan.height} output)")
+    # What the AI does
+    lines.append("What the AI does to it")
+    width = max(len(_short(test.model)) for test in report.model_tests)
+    for test in report.model_tests:
+        effect = test.effect
+        lines.append(
+            f"  {_short(test.model):<{width}}  sharpness {effect.sharpening:+.2f} · "
+            f"noise {_signed(effect.noise_change)} · structure {effect.structure:.2f}"
+            f"  → AI strength {test.ai_strength:g}"
+        )
+        if test.reasons:
+            lines.append(f"  {'':<{width}}  {', '.join(test.reasons)}")
+    lines.append("")
+
+    # Speed test
+    lines.append(f"Speed test ({_short(options.model)}, {plan.width}x{plan.height} output)")
     if not report.runs:
         lines.append("  skipped (--no-benchmark)")
-    best = report.best_run
+    best_run = report.best_run
     for run in report.runs:
-        config = f"tile {run.tile or 'off':<5} {'FP16' if run.half else 'FP32'}"
+        config = f"tile {run.tile or 'off'}, {'FP16' if run.half else 'FP32'}"
+        if run.threads:
+            config += f", {run.threads} threads"
         result = f"{run.seconds_per_frame:.2f} s/frame" if run.ok else run.error
-        marker = "  ← fastest" if run is best else ""
-        lines.append(f"  {config}   {result}{marker}")
+        marker = "  ← fastest" if run is best_run else ""
+        lines.append(f"  {config:<28} {result}{marker}")
+    lines.append("")
+
+    # Presets
+    lines.append("Presets")
+    for name, preset in report.presets.items():
+        details = [_short(preset.options.model), f"AI {preset.options.ai_strength:g}"]
+        if preset.estimated_seconds is not None:
+            details.append(f"~{_human_duration(preset.estimated_seconds)}")
+        marker = "  ← recommended" if name == report.recommended_preset else ""
+        lines.append(f"  {name:<5} {' · '.join(details)}  ({preset.description}){marker}")
     if report.estimated_seconds is not None:
-        lines.append(
-            f"  Estimate: ~{_human_duration(report.estimated_seconds)} for "
-            f"{plan.frames_to_process:,} frames (rough; encoding not included)"
-        )
-    if best and report.preprocess_seconds > best.seconds_per_frame:
-        lines.append(f"  Note: the '{options.profile}' profile is slower than the AI here.")
+        lines.append("  Times are rough: they don't include loading the model or encoding.")
     lines.append("")
 
     # Sheet
     if report.sheet_path:
         lines += [
             f"Comparison sheet: {report.sheet_path}",
-            f"  The same 100% crop of frame {report.sample_frame}: columns are AI strengths,",
-            "  rows are profiles. Pick the one you like and adjust the command below.",
+            f"  The same 100% crop of frame {report.sample_frame}: columns are AI strengths",
+            "  (the presets' picks are marked), rows are the presets. Adjust to taste.",
             "",
         ]
 
-    lines += ["Suggested command:", f"  {format_command(input_path, output_path, options)}"]
+    lines.append("Commands")
+    for name, preset in report.presets.items():
+        marker = " (recommended)" if name == report.recommended_preset else ""
+        lines += [
+            f"  {name}{marker}:",
+            f"    {format_command(input_path, _output_for(output_path, name), preset.options)}",
+        ]
     return "\n".join(lines)
+
+
+def _output_for(output_path, preset: str) -> str:
+    """``best`` writes to ``<name>_best.mp4`` so both presets can be compared side by side."""
+    if preset == "fast":
+        return str(output_path)
+    path = Path(output_path)
+    return str(path.with_name(f"{path.stem}_{preset}{path.suffix}"))
+
+
+def _short(model: str) -> str:
+    return model.replace("realesrgan-", "").replace("realesr-", "")
+
+
+def _signed(value: float) -> str:
+    return "±0.0" if abs(value) < 0.05 else f"{value:+.1f}"
 
 
 def _human_duration(seconds: float) -> str:

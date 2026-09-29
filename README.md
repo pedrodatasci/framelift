@@ -141,7 +141,7 @@ This gives you the `framelift` command. `python -m framelift` works too.
 ## Quick start
 
 ```bash
-# 1. Let framelift measure your machine and suggest settings (prints a ready command)
+# 1. Let framelift measure your video and machine (prints a fast and a best command)
 framelift tune -i input.mp4
 
 # 2. Try it on the first ~10 seconds (300 frames at 30 fps) to judge the look quickly
@@ -160,88 +160,128 @@ upscale and a 45% AI blend.
 
 ## Finding the best settings (`framelift tune`)
 
-Not sure which tile, profile or scale to use? Let framelift find out:
+Small changes in the settings can change the result a lot, and the right values depend on
+*your* footage. Let framelift measure them:
 
 ```bash
 framelift tune -i input.mp4
 ```
 
-It takes a minute or two (longer on a slow CPU with big videos) and does three things:
+It takes a minute or two (longer on a slow CPU with big videos) and works in five steps:
 
-1. **Measures speed on your machine.** It upscales a real frame of *your* video with each
-   candidate configuration and keeps the fastest one that fits in memory. On an NVIDIA
-   GPU it tries no tiling and tiles of 1024 down to 256 with FP16, then checks the winner
-   without FP16 too (FP16 is slower on some older cards). On CPU it compares tiles 256
-   and 128. It also checks whether NVENC works.
-2. **Looks at your footage.** It measures the noise that's left in the file on a few
-   frames spread across the video and suggests a profile. It also suggests a scale that
-   lands on Full HD without stretching more than 3x (videos already in Full HD or larger
-   get `--same-resolution`).
-3. **Makes a comparison sheet** (`input_tune.png`): the same 100% crop of the most detailed
-   area of one frame, rendered with different AI strengths (columns) and profiles (rows).
+1. **Looks at your footage.** On frames spread across the video it measures **softness**
+   (how blurry the picture is), **noise** (which picks the clean-up profile) and
+   resolution (which picks a scale that lands on Full HD without stretching more than 3x).
+   For the tests it picks the sharpest *steady* frame, skipping fast motion and scene cuts.
+2. **Measures your machine.** It upscales a real frame with each candidate setup and keeps
+   the fastest one that fits in memory: tile sizes, FP16 on NVIDIA (double-checked without
+   it, since FP16 is slower on some older cards) and, on CPU, **the number of threads**
+   (laptops that mix fast and efficiency cores are often faster with fewer). It also checks
+   whether NVENC works.
+3. **Measures what the AI does to your footage.** This is where it adapts to the input.
+   Small crops are upscaled with and without AI, and three things are measured:
+   - **sharpness:** how much the AI actually brings back compared with a plain resize;
+   - **noise:** whether the AI cleans noise up or invents grain and texture;
+   - **structure:** whether it restores the picture or starts redrawing details.
 
-Here's the real sheet tune made for the music video above. From left to right it goes from
-a plain resize to full AI; the rows compare the untouched frame with the `minimal` profile.
-Click it to see it at full size.
+   Those decide the **AI strength**, separately for each model. A soft source where the AI
+   recovers a lot gets a high strength. An already-sharp source, or a model that invents
+   texture on this footage, gets a lower one.
+4. **Builds two presets**, each with its own time estimate:
+   - **`fast`**: the light video model (`realesr-animevideov3`). Usually minutes.
+   - **`best`**: a heavier model (`realesrgan-x4plus`, or the anime model with `--anime`)
+     that recovers more detail, plus more careful settings: `--pre-pad 10` against edge
+     artifacts, `--crf 18` so the encoder keeps more detail, and a slower x264 preset.
+     On a CPU it can be around 30x slower.
+
+   `best` is recommended when it's estimated to finish within 10 minutes (short clips, or
+   a GPU); otherwise `fast` is.
+5. **Makes a comparison sheet** (`input_tune.png`): the same 100% crop rendered with each
+   preset (rows) and different AI strengths (columns), with each preset's pick marked.
+
+Here's the real sheet for the color music video above. The bottom row is the `best` preset:
+notice the sharper studs on the strap. Click it to see it at full size.
 
 ![Comparison sheet made by framelift tune](docs/tune_sheet.jpg)
 
-It ends with a report and a ready-to-run command. Example (numbers are illustrative):
+And the report it printed (a real run on a single-core test machine, so the times are long):
 
 ```
 Your machine
   CPU (no NVIDIA GPU in use, so expect it to be slow)
 
 Your video
-  clip.mp4  640x360 @ 29.970 fps, 5,400 frames (3m00s)
-  Look   light grain (noise 3.4) → profile soft_camera
-  Size   360p → 1080p → --scale 3
+  input.mp4  720x480 @ 29.970 fps, 92 frames (0m03s)
+  Softness  soft (0.48)
+  Noise     very clean (0.4) → profile none
+  Size      480p → 1080p → --scale 2.25
+  Tested on frame 37 (the sharpest steady one)
 
-Speed (realesr-animevideov3, 1920x1080 output)
-  tile 256   FP32   2.41 s/frame
-  tile 128   FP32   2.18 s/frame  ← fastest
-  Estimate: ~3h16 for 5,400 frames (rough; encoding not included)
+What the AI does to it
+  animevideov3  sharpness +0.10 · noise -0.2 · structure 0.96  → AI strength 0.5
+                recovers some sharpness
+  x4plus        sharpness +0.20 · noise +0.2 · structure 0.96  → AI strength 0.6
+                recovers sharpness well
 
-Comparison sheet: /home/you/clip_tune.png
-  The same 100% crop of frame 2700: columns are AI strengths,
-  rows are profiles. Pick the one you like and adjust the command below.
+Speed test (animevideov3, 1620x1080 output)
+  tile 256, FP32               5.85 s/frame
+  tile 128, FP32               4.34 s/frame  ← fastest
 
-Suggested command:
-  framelift -i clip.mp4 -o clip_enhanced.mp4 --scale 3 --profile soft_camera --device cpu --tile 128 --x264-preset medium
+Presets
+  fast  animevideov3 · AI 0.5 · ~7 min  (light video model)  ← recommended
+  best  x4plus · AI 0.6 · ~3h56  (heavier model, more careful encoding)
+  Times are rough: they don't include loading the model or encoding.
+
+Comparison sheet: /home/you/input_tune.png
+  The same 100% crop of frame 37: columns are AI strengths
+  (the presets' picks are marked), rows are the presets. Adjust to taste.
+
+Commands
+  fast (recommended):
+    framelift -i input.mp4 -o input_enhanced.mp4 --scale 2.25 --ai-strength 0.5 --device cpu --tile 128 --x264-preset medium
+  best:
+    framelift -i input.mp4 -o input_enhanced_best.mp4 --model realesrgan-x4plus --scale 2.25 --ai-strength 0.6 --device cpu --tile 128 --pre-pad 10 --crf 18 --x264-preset slow
 ```
 
 Good to know:
 
+- **Faster vs. better is about the model, not the AI strength.** The AI strength is only a
+  blend at the end, so it costs no time at all. The presets differ in model and encoding
+  effort; each gets the strength that suits it on your footage.
 - **Anything you pass is kept.** `framelift tune -i vhs.mp4 --scale 2 --profile old_tv`
-  keeps your scale and profile, tunes everything else, and marks yours as "(yours)".
-- **The look suggestions are a starting point; the sheet has the final word.** Noise and
-  resolution are measured, but taste isn't. Pick the version you like best and set
-  `--ai-strength` and `--profile` to match.
-- **Heavy compression can hide grain from the noise check.** Compression can turn fine
-  grain into larger blotches, which the noise measurement doesn't pick up, so grainy
-  footage may be reported as clean. If you can see grain, compare the profile rows in the
-  sheet or try `--profile soft_camera`.
-- **The sheet's frame is picked automatically**, by amount of detail. Once in a while a
-  blurry transition wins. If the crop doesn't look representative, run tune again with a
-  different `--samples` value.
-- **The time estimate is rough.** It counts the AI and the pre-cleaning, but not loading
-  the model or encoding. In our tests the real run took about 15% longer.
-- **The model is your call.** Telling anime from live action automatically isn't reliable,
-  so tune uses the default model unless you pass `--model`.
+  keeps your scale and profile, tunes everything else, and marks yours as "(yours)". With
+  `--model`, only that model is tuned (no fast/best choice).
+- **The measurements are a strong starting point; the sheet has the final word.** The
+  strength rules were calibrated on a handful of clips (sharp, blurry and grainy synthetic
+  video, plus real old footage), and taste still matters. Pick the tile of the sheet you
+  like best and adjust `--ai-strength` to match.
+- **Grain and blotches aren't the same thing.** Old footage often shows blotchy patches in
+  dark areas, left by earlier compression. They aren't pixel noise, so the noise check
+  doesn't count them and suggests no clean-up profile; step 3 measures how the AI deals
+  with them. If they bother you, run tune again with `--profile soft_camera` and compare
+  the sheets.
+- **The time estimates are rough.** They count the AI and the pre-cleaning, but not loading
+  the model or encoding. In our tests the real run took about 15% longer. On CPU, `best`
+  is extrapolated from a smaller test.
+- **The first run downloads the heavier model** (67 MB). `--no-best` skips it and tunes
+  only the `fast` preset.
 - **On slow CPUs with Full HD or larger videos, the speed test itself can take several
-  minutes.** `--no-benchmark` skips it and still gives you the look suggestions and the sheet.
-- When the AI is slow, tune suggests `--x264-preset medium`: the encoder has time to spare,
-  so you get smaller files at the same quality for practically free.
+  minutes.** `--no-benchmark` skips it and still gives you the measurements, the presets
+  (without time estimates) and the sheet.
+- **Both presets write to different files** (`_enhanced.mp4` and `_enhanced_best.mp4`), so
+  you can run both on a short clip and compare.
 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-i`, `--input VIDEO` | *required* | Video to analyse. |
-| `-o`, `--output MP4` | `<input>_enhanced.mp4` | Only used to write the suggested command. |
-| `--samples N` | `3` | Frames spread across the video that are inspected for noise and detail. |
+| `-o`, `--output MP4` | `<input>_enhanced.mp4` | Only used to write the suggested commands (`best` adds `_best`). |
+| `--samples N` | `6` | Frames spread across the video that are inspected for noise, softness and motion. |
 | `--sheet PNG` | `<input>_tune.png` | Where to save the comparison sheet (in the current folder by default). |
 | `--no-sheet` | off | Don't make a comparison sheet. |
-| `--no-benchmark` | off | Skip the speed test: much faster on CPU, but no tile/FP16 tuning and no time estimate. |
-| `--model`, `--device`, `--gpu-id`, `--weights-dir`, `--torch-threads`, `--profile`, `--scale`, `--same-resolution`, `--ai-strength`, `--tile`, `--half`, `--encoder`, `--start-frame`, `--max-frames` | not set | Same meaning as in the main command. Whatever you pass is kept as-is and carried into the suggested command. `--start-frame` and `--max-frames` change the time estimate. |
+| `--no-benchmark` | off | Skip the speed test: much faster on CPU, but no tile/FP16/thread tuning and no time estimates. |
+| `--no-best` | off | Only tune the `fast` preset: skips the heavier model and its download. |
+| `--anime` | off | The video is animation: the `best` preset uses `realesrgan-x4plus-anime-6B`. |
+| `--model`, `--device`, `--gpu-id`, `--weights-dir`, `--torch-threads`, `--profile`, `--scale`, `--same-resolution`, `--ai-strength`, `--tile`, `--half`, `--encoder`, `--start-frame`, `--max-frames` | not set | Same meaning as in the main command. Whatever you pass is kept as-is and carried into the suggested commands. `--start-frame` and `--max-frames` change the time estimates. |
 | `-v`, `-q` | | More detail / only the final report. |
 
 Exit codes are the same as the main command; <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels with code 130.
@@ -403,8 +443,8 @@ machine. Otherwise, rough guidance:
 - **`--scale` barely affects speed.** The models always upscale 4x internally and resize to
   your scale at the end, so 1080p output costs about the same AI time as 720p.
 - **More CPU threads isn't always faster.** On laptops that mix performance and efficiency
-  cores, a lower `--torch-threads` (say 4–6) can beat using them all. Try a few values with
-  `--max-frames 10`. Keep the laptop plugged in and out of power-saving mode, too.
+  cores, a lower `--torch-threads` (say 4–6) can beat using them all. `framelift tune`
+  tests this for you. Keep the laptop plugged in and out of power-saving mode, too.
 - On CPU, expect roughly seconds per frame rather than frames per second. Test with
   `--max-frames` first to estimate the total time.
 
@@ -545,13 +585,19 @@ while True:
 from framelift import enhance_video, tune_video
 
 report = tune_video("clip.mp4", sheet_path="clip_tune.png")
-print(report.noise_label, report.recommended.profile, report.estimated_seconds)
+print(report.softness_label, "→ recommended:", report.recommended_preset)
 
-enhance_video("clip.mp4", "clip_hd.mp4", report.recommended)
+for name, preset in report.presets.items():
+    print(name, preset.options.model, preset.options.ai_strength, preset.estimated_seconds)
+
+enhance_video("clip.mp4", "clip_hd.mp4", report.presets["fast"].options)
 ```
 
-Pass `options=EnhanceOptions(...)` as a starting point and `keep={"profile", "scale"}` to
-pin settings you've already decided on. `benchmark=False` skips the speed test.
+`report.recommended` is the recommended preset's options, and `report.model_tests` holds
+what each model measurably does to the footage. Pass `options=EnhanceOptions(...)` as a
+starting point and `keep={"profile", "scale"}` to pin settings you've already decided on.
+`try_best=False` skips the heavier model, `content="anime"` picks the anime model for the
+`best` preset, and `benchmark=False` skips the speed test.
 
 ### Building blocks
 
@@ -565,6 +611,7 @@ from framelift import (
     estimate_noise,
     plan_run,
     probe_video,
+    softness,
     suggest_size,
 )
 
@@ -572,6 +619,7 @@ info = probe_video("in.mp4")  # fps, frame_count, width, height
 plan = plan_run(info, EnhanceOptions(scale=2))  # sizes/ranges, without running anything
 cleaned = apply_profile(cv2.imread("frame.png"), "old_tv")
 noise = estimate_noise(cleaned)  # ~0 = clean, 10+ = very noisy
+blur = softness(cleaned)  # ~0.15 = sharp, 0.5+ = soft
 suggest_size(640, 360).scale  # 3.0 (360p → 1080p)
 ```
 
@@ -618,8 +666,8 @@ framelift/
 ├── src/framelift/
 │   ├── cli.py         # command-line interface and Ctrl+C handling
 │   ├── pipeline.py    # VideoEnhancer / enhance_video: orchestrates a run
-│   ├── tuning.py      # tune_video: benchmark + suggestions + comparison sheet
-│   ├── analysis.py    # noise, size and detail heuristics; sheet layout
+│   ├── tuning.py      # tune_video: speed test, AI-effect test, presets, sheet
+│   ├── analysis.py    # noise, softness, motion and AI-effect measurements; sheet
 │   ├── tune_cli.py    # the `framelift tune` subcommand
 │   ├── planning.py    # RunPlan / EnhanceResult: sizes, ranges, frame rates
 │   ├── options.py     # EnhanceOptions: every setting, validated

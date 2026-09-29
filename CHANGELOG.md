@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-09-29
+
+### Added
+
+- **`framelift tune` adapts the AI strength to the footage.** Small crops are upscaled
+  with and without AI and three things are measured: how much sharpness the AI brings
+  back, whether it cleans noise or invents texture, and whether it preserves the picture's
+  structure (SSIM). Those decide the AI strength, separately for each model. Across the
+  calibration clips the suggestion now ranges from 0.4 (already-sharp source) to 0.7
+  (blurry source), instead of the fixed 0.45.
+- **Two presets with time estimates**: `fast` (the light video model) and `best` (a
+  heavier model, `realesrgan-x4plus` or the anime model with `--anime`, plus `--pre-pad 10`,
+  `--crf 18` and a slower x264 preset). `best` is recommended when it's estimated to finish
+  within 10 minutes. The `best` command writes to `<output>_best.mp4`, so both can be
+  compared.
+- **Softness measurement** (Crété-Roffet no-reference blur metric), shown in the report.
+- **CPU thread test**: all threads, half, and 4 are compared, because laptops that mix
+  performance and efficiency cores are often faster with fewer threads.
+- **Smarter test frame**: the sharpest *steady* frame is used, skipping fast motion and
+  scene cuts, and detail is scored after a light blur so pixel noise doesn't pass for detail.
+- The comparison sheet has one row per preset, with each preset's AI strength marked.
+- New tune flags: `--no-best`, `--anime`. `--samples` now defaults to 6.
+- Python API: `Preset`, `AIEffect`, `softness()`, `suggest_ai_strength()`, and
+  `TuneReport.presets`, `.model_tests`, `.recommended_preset`, `.softness`.
+
+### Changed
+
+- `TuneReport.recommended` now returns the recommended preset's options.
+- The README note claiming that compression hides grain from the noise check was wrong.
+  A pixel-level look at the concert footage showed that it is soft, not grainy; the
+  blotches in dark areas aren't pixel noise. The note now explains the difference.
+
+### Unchanged
+
+- `framelift -i … -o …` still produces output bit-identical to the original script.
+
 ## [1.1.0] — 2026-09-28
 
 ### Added

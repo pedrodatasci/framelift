@@ -71,3 +71,13 @@ def test_read_frames_returns_the_requested_frames(make_video):
     frames = read_frames(make_video(frames=10), [2, 7])
     assert [number for number, _ in frames] == [2, 7]
     assert frames[1][1].mean() == pytest.approx(70, abs=3)
+
+
+def test_read_frame_pairs_includes_the_next_frame(make_video):
+    from framelift.video import read_frame_pairs
+
+    pairs = read_frame_pairs(make_video(frames=5), [2, 5])
+    (n1, frame, following), (n2, last, after_last) = pairs
+    assert (n1, n2) == (2, 5)
+    assert following.mean() == pytest.approx(30, abs=3)  # frame 3
+    assert after_last is None

@@ -59,6 +59,155 @@ def describe_noise(noise: float) -> tuple[str, str]:
     raise AssertionError("unreachable: the last level has no upper bound")
 
 
+# -- softness -----------------------------------------------------------------------
+
+# (upper bound, label). Calibrated on clips from crisp synthetic video (~0.15) to
+# visibly soft old footage (~0.45–0.55).
+SOFTNESS_LEVELS: tuple[tuple[float, str], ...] = (
+    (0.25, "sharp"),
+    (0.40, "slightly soft"),
+    (0.55, "soft"),
+    (float("inf"), "very soft"),
+)
+
+
+def softness(frame: Frame) -> float:
+    """How blurry a frame is, from 0 (sharp) to 1 (very blurry).
+
+    Crété-Roffet's no-reference blur metric: blur the frame a bit more and see how
+    much contrast between neighbouring pixels is lost. A sharp image loses a lot;
+    an already-blurry one barely changes. Fairly independent of content.
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
+    blur_per_axis = []
+    for axis, kernel in ((0, (1, 9)), (1, (9, 1))):
+        reblurred = cv2.blur(gray, kernel)
+        original_contrast = np.abs(np.diff(gray, axis=axis))
+        remaining_contrast = np.abs(np.diff(reblurred, axis=axis))
+        lost = np.maximum(0, original_contrast - remaining_contrast).sum()
+        total = max(original_contrast.sum(), 1e-9)
+        blur_per_axis.append((total - lost) / total)
+    return float(max(blur_per_axis))
+
+
+def describe_softness(value: float) -> str:
+    for upper_bound, label in SOFTNESS_LEVELS:
+        if value < upper_bound:
+            return label
+    raise AssertionError("unreachable: the last level has no upper bound")
+
+
+def motion(frame: Frame, next_frame: Frame) -> float:
+    """Average brightness change between two frames (0–255). High = fast motion or a cut."""
+    small = [
+        cv2.resize(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY), (160, 90)) for f in (frame, next_frame)
+    ]
+    return float(np.abs(small[0].astype(np.float64) - small[1]).mean())
+
+
+def structural_similarity(a: Frame, b: Frame) -> float:
+    """SSIM between two same-sized frames: 1.0 = identical structure."""
+    x, y = (cv2.cvtColor(f, cv2.COLOR_BGR2GRAY).astype(np.float64) for f in (a, b))
+    c1, c2 = (0.01 * 255) ** 2, (0.03 * 255) ** 2
+
+    def smooth(image):
+        return cv2.GaussianBlur(image, (0, 0), 1.5)
+
+    mean_x, mean_y = smooth(x), smooth(y)
+    var_x = smooth(x * x) - mean_x**2
+    var_y = smooth(y * y) - mean_y**2
+    covariance = smooth(x * y) - mean_x * mean_y
+    ssim_map = ((2 * mean_x * mean_y + c1) * (2 * covariance + c2)) / (
+        (mean_x**2 + mean_y**2 + c1) * (var_x + var_y + c2)
+    )
+    return float(ssim_map.mean())
+
+
+# -- what the AI does to this footage -----------------------------------------------
+
+
+@dataclass(frozen=True)
+class AIEffect:
+    """How a model changes *this* footage, compared with a plain resize.
+
+    * ``sharpening``: softness removed (plain resize minus AI). ~0 = adds nothing.
+    * ``noise_change``: noise after the AI minus before, measured at the source size.
+      Negative = cleans noise; positive = invents grain or texture.
+    * ``structure``: SSIM between the AI result (shrunk back) and the source.
+      Below ~0.93 the AI is redrawing details rather than restoring them.
+    """
+
+    sharpening: float
+    noise_change: float
+    structure: float
+
+    @classmethod
+    def measure(cls, source: Frame, classic: Frame, enhanced: Frame) -> AIEffect:
+        """``classic`` and ``enhanced`` are the same crop upscaled without / with AI."""
+        height, width = source.shape[:2]
+        shrunk = cv2.resize(enhanced, (width, height), interpolation=cv2.INTER_AREA)
+        return cls(
+            sharpening=softness(classic) - softness(enhanced),
+            noise_change=estimate_noise(shrunk) - estimate_noise(source),
+            structure=structural_similarity(shrunk, source),
+        )
+
+    @classmethod
+    def average(cls, effects: Sequence[AIEffect]) -> AIEffect:
+        return cls(
+            sharpening=float(np.mean([e.sharpening for e in effects])),
+            noise_change=float(np.mean([e.noise_change for e in effects])),
+            structure=float(np.mean([e.structure for e in effects])),
+        )
+
+
+def suggest_ai_strength(
+    effect: AIEffect, source_softness: float | None = None
+) -> tuple[float, list[str]]:
+    """Pick an AI strength from what the AI actually does, with the reasons why.
+
+    The more real sharpness the AI brings back, the more of it we keep. Invented
+    texture, redrawn structure or an already-sharp source pull it back down.
+    Rules calibrated on a handful of clips (crisp, blurred and grainy synthetic
+    video, plus real old footage).
+    """
+    strength, reasons = 0.45, []
+
+    if source_softness is not None and source_softness < SOFTNESS_LEVELS[0][0]:
+        strength -= 0.10
+        reasons.append("source is already sharp")
+
+    if effect.sharpening >= 0.25:
+        strength += 0.25
+        reasons.append("recovers a lot of sharpness")
+    elif effect.sharpening >= 0.12:
+        strength += 0.15
+        reasons.append("recovers sharpness well")
+    elif effect.sharpening >= 0.06:
+        strength += 0.05
+        reasons.append("recovers some sharpness")
+    elif effect.sharpening < 0.05:
+        strength -= 0.15
+        reasons.append("adds little sharpness (source is already crisp)")
+
+    if effect.noise_change <= -0.25:
+        strength += 0.05
+        reasons.append("cleans up noise")
+    elif effect.noise_change >= 0.30:
+        strength -= 0.10
+        reasons.append("invents grain or texture")
+
+    if effect.structure < 0.90:
+        strength -= 0.15
+        reasons.append("redraws details noticeably")
+    elif effect.structure < 0.93:
+        strength -= 0.05
+        reasons.append("redraws some details")
+
+    strength = min(0.85, max(0.20, strength))
+    return round(strength * 20) / 20, reasons
+
+
 # -- size --------------------------------------------------------------------------
 
 MAX_SUGGESTED_SCALE = 3.0
@@ -118,9 +267,31 @@ def sample_positions(frame_count: int, samples: int) -> list[int]:
 
 
 def detail_score(frame: Frame) -> float:
-    """How much fine detail a frame has (variance of the Laplacian)."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    """How much real detail a frame has (variance of the Laplacian).
+
+    A light blur first keeps pixel noise from passing for detail.
+    """
+    gray = cv2.GaussianBlur(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (0, 0), 1.0)
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def rank_test_frames(
+    samples: Sequence[tuple[int, Frame, Frame | None]],
+) -> list[tuple[int, Frame]]:
+    """Order ``(number, frame, next_frame)`` samples from best to worst test material.
+
+    Frames during fast motion or right at a scene cut are blurred or mixed, so
+    anything moving much more than is typical for this video goes last. The rest
+    are ordered sharpest first.
+    """
+    moves = [motion(frame, nxt) if nxt is not None else 0.0 for _, frame, nxt in samples]
+    limit = max(2 * float(np.median(moves)), 3.0)
+
+    def badness(index: int) -> tuple[bool, float]:
+        return moves[index] > limit, softness(samples[index][1])
+
+    order = sorted(range(len(samples)), key=badness)
+    return [(samples[i][0], samples[i][1]) for i in order]
 
 
 @dataclass(frozen=True)
@@ -164,21 +335,23 @@ _TEXT = (235, 235, 235)
 _MUTED = (150, 150, 150)
 _GAP = 8
 _LABEL_HEIGHT = 30
-_ROW_LABEL_WIDTH = 150
+_ROW_LABEL_WIDTH = 200
 _TITLE_HEIGHT = 44
 
 
 def build_comparison_sheet(
-    rows: Sequence[str],
+    rows: Sequence[str | Sequence[str]],
     columns: Sequence[str],
     render: Callable[[int, int], Frame],
     title: str = "",
 ) -> Frame:
     """Assemble a labelled grid: ``render(row, col)`` returns each tile.
 
+    A row label is either a profile name or ``(caption, main, detail)`` lines.
     All tiles must have the same size. Labels use plain ASCII (OpenCV's fonts
     have no accents).
     """
+    rows = [("profile", row) if isinstance(row, str) else tuple(row) for row in rows]
     tiles = [[render(r, c) for c in range(len(columns))] for r in range(len(rows))]
     tile_height, tile_width = tiles[0][0].shape[:2]
 
@@ -192,8 +365,12 @@ def build_comparison_sheet(
     for r, row_name in enumerate(rows):
         top = _TITLE_HEIGHT + r * (tile_height + _LABEL_HEIGHT + _GAP)
         middle = top + _LABEL_HEIGHT + tile_height // 2
-        cv2.putText(sheet, "profile", (_GAP * 2, middle - 12), _FONT, 0.5, _MUTED, 1, cv2.LINE_AA)
-        cv2.putText(sheet, row_name, (_GAP * 2, middle + 14), _FONT, 0.6, _TEXT, 1, cv2.LINE_AA)
+        caption, main, *detail = row_name
+        cv2.putText(sheet, caption, (_GAP * 2, middle - 16), _FONT, 0.5, _MUTED, 1, cv2.LINE_AA)
+        cv2.putText(sheet, main, (_GAP * 2, middle + 10), _FONT, 0.6, _TEXT, 1, cv2.LINE_AA)
+        for i, line in enumerate(detail):
+            y = middle + 32 + i * 20
+            cv2.putText(sheet, line, (_GAP * 2, y), _FONT, 0.45, _MUTED, 1, cv2.LINE_AA)
 
         for c, column_name in enumerate(columns):
             left = _ROW_LABEL_WIDTH + _GAP + c * (tile_width + _GAP)

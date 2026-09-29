@@ -84,6 +84,34 @@ def read_frames(path: str | Path, numbers: Iterable[int]) -> list[tuple[int, Fra
     return frames
 
 
+def read_frame_pairs(
+    path: str | Path, numbers: Iterable[int]
+) -> list[tuple[int, Frame, Frame | None]]:
+    """Read each requested frame (1-based) together with the frame right after it.
+
+    The pair shows how much is moving at that moment; ``None`` at the very end.
+    """
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        raise VideoReadError(f"Couldn't open the video: {path}")
+
+    pairs = []
+    try:
+        for number in numbers:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, max(0, number - 1))
+            ok, image = capture.read()
+            if not ok:
+                continue
+            ok_next, next_image = capture.read()
+            pairs.append((number, image, next_image if ok_next else None))
+    finally:
+        capture.release()
+
+    if not pairs:
+        raise VideoReadError(f"Couldn't decode any frames from {path}")
+    return pairs
+
+
 @dataclass(frozen=True)
 class SourceFrame:
     """A decoded (and pre-cleaned) frame on its way to the AI."""

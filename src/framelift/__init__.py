@@ -16,9 +16,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
-from .analysis import estimate_noise, suggest_size
+from .analysis import AIEffect, estimate_noise, softness, suggest_ai_strength, suggest_size
 from .console import setup_console
 from .errors import (
     BlackFrameError,
@@ -38,7 +38,7 @@ from .video import VideoInfo, probe_video
 
 if TYPE_CHECKING:  # pragma: no cover
     from .pipeline import VideoEnhancer, enhance_video
-    from .tuning import TuneReport, tune_video
+    from .tuning import Preset, TuneReport, tune_video
 
 # Names that live in modules importing PyTorch; resolved on first access.
 _LAZY = {
@@ -46,6 +46,7 @@ _LAZY = {
     "VideoEnhancer": "pipeline",
     "tune_video": "tuning",
     "TuneReport": "tuning",
+    "Preset": "tuning",
 }
 
 __all__ = [
@@ -59,7 +60,11 @@ __all__ = [
     "plan_run",
     "tune_video",
     "TuneReport",
+    "Preset",
+    "AIEffect",
     "estimate_noise",
+    "softness",
+    "suggest_ai_strength",
     "suggest_size",
     # catalogs
     "MODELS",

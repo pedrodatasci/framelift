@@ -79,24 +79,47 @@ def test_stop_event_saves_a_partial_video(make_video, tmp_path, options, monkeyp
     assert probe_video(result.output_path).frame_count == result.frames_written
 
 
-def test_tune_video_recommends_runnable_settings(make_video, tmp_path, options):
+def test_tune_video_builds_runnable_presets(make_video, tmp_path, options):
     from framelift import tune_video
 
     report = tune_video(
         make_video(frames=12), options, keep={"weights_dir"}, sheet_path=tmp_path / "s.png"
     )
 
-    assert report.best_run is not None and report.estimated_seconds > 0
-    assert report.recommended.device == "cpu"
+    assert set(report.presets) == {"fast", "best"}
+    fast, best = report.presets["fast"], report.presets["best"]
+    assert fast.options.model == "realesr-animevideov3"
+    assert best.options.model == "realesrgan-x4plus"
+    assert best.estimated_seconds > fast.estimated_seconds > 0
+    assert [test.model for test in report.model_tests] == [fast.options.model, best.options.model]
+    assert report.recommended is report.presets[report.recommended_preset].options
     assert report.sheet_path.exists()
-    report.recommended.validate()
+    for preset in report.presets.values():
+        preset.options.validate()
+        assert 0.2 <= preset.options.ai_strength <= 0.85
 
 
 def test_tune_video_respects_pinned_settings(make_video, options):
     from framelift import tune_video
 
-    options.profile, options.scale = "heavy_noise", 2
-    report = tune_video(make_video(frames=12), options, keep={"profile", "scale"}, benchmark=False)
+    options.profile, options.scale, options.ai_strength = "heavy_noise", 2, 0.33
+    report = tune_video(
+        make_video(frames=12),
+        options,
+        keep={"profile", "scale", "ai_strength"},
+        benchmark=False,
+        try_best=False,
+    )
 
+    assert list(report.presets) == ["fast"]
     assert (report.recommended.profile, report.recommended.scale) == ("heavy_noise", 2)
+    assert report.recommended.ai_strength == 0.33
+    assert report.model_tests[0].reasons == ["your choice"]
     assert report.runs == [] and report.estimated_seconds is None
+
+
+def test_tune_video_anime_uses_the_anime_model(make_video, options):
+    from framelift import tune_video
+
+    report = tune_video(make_video(frames=8), options, content="anime", benchmark=False)
+    assert report.presets["best"].options.model == "realesrgan-x4plus-anime-6B"
