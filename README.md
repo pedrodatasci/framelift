@@ -22,13 +22,35 @@ the original footage.
 framelift -i grandma_1998.mp4 -o grandma_1998_hd.mp4 --profile old_tv --scale 2
 ```
 
-   ## Before / after
+## Before / after
 
-   ![Before and after, zoomed in](docs/demo_zoom.gif)
+Two real clips, both upscaled from 480p to 1080p. Each GIF shows the same area side by
+side: the original on the left (just stretched to the same size), framelift on the right.
 
-   ![Before and after, full frame](docs/demo_full.gif)
+**Color music video:** cleaner strings and frets, less compression blockiness.
 
-   <sub>Old black-and-white concert footage, 480p → 1080p, enhanced on a laptop CPU.</sub>
+![Before and after: color music video, zoomed in](docs/music_video_zoom.gif)
+
+<details>
+<summary>Full frame</summary>
+
+![Before and after: color music video, full frame](docs/music_video_full.gif)
+
+</details>
+
+**Black-and-white concert footage:** grain and blocky artifacts cleaned up, crisper edges.
+Enhanced on a laptop CPU.
+
+![Before and after: black-and-white concert footage, zoomed in](docs/demo_zoom.gif)
+
+<details>
+<summary>Full frame</summary>
+
+![Before and after: black-and-white concert footage, full frame](docs/demo_full.gif)
+
+</details>
+
+<sub>GIFs are compressed and scaled down for this page; the real MP4 output is sharper.</sub>
 
 ## Highlights
 
@@ -50,6 +72,7 @@ framelift -i grandma_1998.mp4 -o grandma_1998_hd.mp4 --profile old_tv --scale 2
 
 ## Contents
 
+- [Before / after](#before--after)
 - [How it works](#how-it-works)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -157,6 +180,12 @@ It takes a minute or two (longer on a slow CPU with big videos) and does three t
 3. **Makes a comparison sheet** (`input_tune.png`): the same 100% crop of the most detailed
    area of one frame, rendered with different AI strengths (columns) and profiles (rows).
 
+Here's the real sheet tune made for the music video above. From left to right it goes from
+a plain resize to full AI; the rows compare the untouched frame with the `minimal` profile.
+Click it to see it at full size.
+
+![Comparison sheet made by framelift tune](docs/tune_sheet.jpg)
+
 It ends with a report and a ready-to-run command. Example (numbers are illustrative):
 
 ```
@@ -186,8 +215,15 @@ Good to know:
 - **Anything you pass is kept.** `framelift tune -i vhs.mp4 --scale 2 --profile old_tv`
   keeps your scale and profile, tunes everything else, and marks yours as "(yours)".
 - **The look suggestions are a starting point; the sheet has the final word.** Noise and
-  resolution are measured, but taste isn't. Pick the tile you like best and set
+  resolution are measured, but taste isn't. Pick the version you like best and set
   `--ai-strength` and `--profile` to match.
+- **Heavy compression can hide grain from the noise check.** Compression can turn fine
+  grain into larger blotches, which the noise measurement doesn't pick up, so grainy
+  footage may be reported as clean. If you can see grain, compare the profile rows in the
+  sheet or try `--profile soft_camera`.
+- **The sheet's frame is picked automatically**, by amount of detail. Once in a while a
+  blurry transition wins. If the crop doesn't look representative, run tune again with a
+  different `--samples` value.
 - **The time estimate is rough.** It counts the AI and the pre-cleaning, but not loading
   the model or encoding. In our tests the real run took about 15% longer.
 - **The model is your call.** Telling anime from live action automatically isn't reliable,
@@ -320,14 +356,15 @@ Run `framelift --help` for the same information in your terminal.
 
 | Name | Best for | Speed | Notes |
 | --- | --- | --- | --- |
-| `realesr-animevideov3` *(default)* | Video in general, animation | ⚡⚡⚡ | Tiny network made for video: temporally stable and by far the fastest. Start here. |
-| `realesrgan-x4plus` | Real-world footage | 🐢 | The most detail, but slow (especially on CPU) and can invent textures; pair with a lower `--ai-strength`. |
+| `realesr-animevideov3` *(default)* | Video in general, animation | ⚡⚡⚡ | Tiny network made for video, and by far the fastest. Start here. |
+| `realesrgan-x4plus` | Real-world footage | 🐢 | The most detail, but slow: about 27x slower than the default on a CPU in our tests. Can invent textures; pair with a lower `--ai-strength`. |
 | `realesrnet-x4plus` | Real-world footage, smoother look | 🐢 | Same size as x4plus, fewer invented textures. |
 | `realesrgan-x4plus-anime-6B` | Anime, cartoons, illustrations | ⚡⚡ | Keeps flat colors and clean lines. |
 
 All models are trained at 4x. framelift then resizes to your `--scale`, so you don't
-have to output 4x-sized video. Weights (about 2.5 MB for the default model, ~67 MB for the x4plus ones) are downloaded automatically
-from the official Real-ESRGAN releases the first time a model is used.
+have to output 4x-sized video. Weights (about 2.5 MB for the default model, 18 MB for the
+anime model and 67 MB for the other two) are downloaded automatically from the official
+Real-ESRGAN releases the first time a model is used.
 
 ## Pre-cleaning profiles
 
@@ -355,14 +392,19 @@ machine. Otherwise, rough guidance:
 | --- | --- |
 | NVIDIA, 8 GB+ VRAM | `--device cuda --half --tile 768` (or `--tile 0` if it fits) `--encoder nvenc` |
 | NVIDIA, 4–6 GB VRAM | `--device cuda --half --tile 384` |
-| CPU / Intel Iris / AMD / Apple | `--device cpu --tile 128` or `256`, default model, and try `--torch-threads` = physical cores |
+| CPU / Intel Iris / AMD / Apple | `--device cpu --tile 128` or `256`, default model, and see the thread tip below |
 
 - **Out of memory?** Halve `--tile`. That's the main memory knob.
 - **Where does the time go?** Add `--debug-timings`. A large `queue` time means the
   reader (profile) is the bottleneck; large `ai` means the model is; large `write`
   means the encoder is (try `--encoder nvenc` or a faster `--x264-preset`).
-- **The model matters more than anything else:** `realesr-animevideov3` is many times
-  faster than the `x4plus` models.
+- **The model matters more than anything else:** `realesr-animevideov3` was about 27x
+  faster than `realesrgan-x4plus` on a CPU in our tests.
+- **`--scale` barely affects speed.** The models always upscale 4x internally and resize to
+  your scale at the end, so 1080p output costs about the same AI time as 720p.
+- **More CPU threads isn't always faster.** On laptops that mix performance and efficiency
+  cores, a lower `--torch-threads` (say 4–6) can beat using them all. Try a few values with
+  `--max-frames 10`. Keep the laptop plugged in and out of power-saving mode, too.
 - On CPU, expect roughly seconds per frame rather than frames per second. Test with
   `--max-frames` first to estimate the total time.
 

@@ -22,13 +22,35 @@ qualidade, para que o vídeo final continue fiel ao original.
 framelift -i vovo_1998.mp4 -o vovo_1998_hd.mp4 --profile old_tv --scale 2
 ```
 
-   ## Antes / Depois
+## Antes / depois
 
-   ![Antes and depois, com zoom](docs/demo_zoom.gif)
+Dois clipes reais, os dois ampliados de 480p para 1080p. Cada GIF mostra a mesma área lado
+a lado: o original à esquerda (só esticado para o mesmo tamanho) e o framelift à direita.
 
-   ![Antes e depois, sem zoom](docs/demo_full.gif)
+**Clipe musical colorido:** cordas e trastes mais limpos, menos blocos de compressão.
 
-   <sub>Gravação antiga em preto e branco, 480p → 1080p, melhorada num notebook usando CPU.</sub>
+![Antes e depois: clipe musical colorido, com zoom](docs/music_video_zoom.gif)
+
+<details>
+<summary>Frame inteiro</summary>
+
+![Antes e depois: clipe musical colorido, frame inteiro](docs/music_video_full.gif)
+
+</details>
+
+**Gravação de show em preto e branco:** granulação e blocos de compressão limpos, bordas
+mais nítidas. Processado na CPU de um notebook.
+
+![Antes e depois: gravação de show em preto e branco, com zoom](docs/demo_zoom.gif)
+
+<details>
+<summary>Frame inteiro</summary>
+
+![Antes e depois: gravação de show em preto e branco, frame inteiro](docs/demo_full.gif)
+
+</details>
+
+<sub>Os GIFs são comprimidos e reduzidos para esta página; o MP4 real gerado é mais nítido.</sub>
 
 ## Destaques
 
@@ -50,6 +72,7 @@ framelift -i vovo_1998.mp4 -o vovo_1998_hd.mp4 --profile old_tv --scale 2
 
 ## Sumário
 
+- [Antes / depois](#antes--depois)
 - [Como funciona](#como-funciona)
 - [Instalação](#instalação)
 - [Primeiros passos](#primeiros-passos)
@@ -157,6 +180,12 @@ Leva um ou dois minutos (mais numa CPU lenta com vídeos grandes) e faz três co
 3. **Gera uma folha de comparação** (`entrada_tune.png`): o mesmo recorte em 100% da área
    mais detalhada de um frame, com diferentes forças de IA (colunas) e perfis (linhas).
 
+Esta é a folha real que o tune gerou para o clipe musical lá de cima. Da esquerda para a
+direita, ela vai de um resize comum até a IA total; as linhas comparam o frame sem
+tratamento com o perfil `minimal`. Clique para ver no tamanho original.
+
+![Folha de comparação gerada pelo framelift tune](docs/tune_sheet.jpg)
+
 No fim, mostra um relatório e um comando pronto para rodar. Exemplo (números ilustrativos):
 
 ```
@@ -188,6 +217,13 @@ Vale saber:
 - **As sugestões visuais são um ponto de partida; quem decide é a folha.** Ruído e resolução
   são medidos, mas gosto não. Escolha o recorte de que mais gostar e ajuste `--ai-strength`
   e `--profile` de acordo.
+- **Compressão forte pode esconder a granulação da medição de ruído.** A compressão pode
+  transformar granulação fina em manchas maiores, que a medição de ruído não detecta; aí um
+  vídeo granulado pode aparecer como limpo. Se você enxerga granulação, compare as linhas de
+  perfil na folha ou experimente `--profile soft_camera`.
+- **O frame da folha é escolhido automaticamente**, pela quantidade de detalhe. De vez em
+  quando uma transição borrada ganha. Se o recorte não parecer representativo, rode o tune
+  de novo com outro valor de `--samples`.
 - **A estimativa de tempo é aproximada.** Ela conta a IA e a pré-limpeza, mas não o
   carregamento do modelo nem a codificação. Nos nossos testes, a execução real levou cerca
   de 15% a mais.
@@ -322,14 +358,14 @@ framelift -i ENTRADA -o SAIDA [opções]
 
 | Nome | Melhor para | Velocidade | Observações |
 | --- | --- | --- | --- |
-| `realesr-animevideov3` *(padrão)* | Vídeo em geral, animação | ⚡⚡⚡ | Rede pequena feita para vídeo: estável entre frames e de longe a mais rápida. Comece por ela. |
-| `realesrgan-x4plus` | Filmagens reais | 🐢 | Mais detalhe, mas lento (principalmente na CPU) e pode inventar texturas; combine com um `--ai-strength` menor. |
+| `realesr-animevideov3` *(padrão)* | Vídeo em geral, animação | ⚡⚡⚡ | Rede pequena feita para vídeo, e de longe a mais rápida. Comece por ela. |
+| `realesrgan-x4plus` | Filmagens reais | 🐢 | Mais detalhe, mas lento: cerca de 27x mais lento que o padrão numa CPU nos nossos testes. Pode inventar texturas; combine com um `--ai-strength` menor. |
 | `realesrnet-x4plus` | Filmagens reais, visual mais suave | 🐢 | Mesmo tamanho do x4plus, inventa menos texturas. |
 | `realesrgan-x4plus-anime-6B` | Anime, desenhos, ilustrações | ⚡⚡ | Preserva cores chapadas e traços limpos. |
 
 Todos os modelos são treinados para 4x. O framelift depois redimensiona para o seu
 `--scale`, então você não é obrigado a gerar vídeo 4x maior. Os pesos (cerca de 2,5 MB
-no modelo padrão e ~67 MB nos x4plus) são baixados automaticamente das releases
+no modelo padrão, 18 MB no modelo de anime e 67 MB nos outros dois) são baixados automaticamente das releases
 oficiais do Real-ESRGAN na primeira vez que o modelo é usado.
 
 ## Perfis de pré-limpeza
@@ -358,14 +394,21 @@ na sua máquina. Fora isso, um guia aproximado:
 | --- | --- |
 | NVIDIA com 8 GB+ de VRAM | `--device cuda --half --tile 768` (ou `--tile 0` se couber) `--encoder nvenc` |
 | NVIDIA com 4–6 GB de VRAM | `--device cuda --half --tile 384` |
-| CPU / Intel Iris / AMD / Apple | `--device cpu --tile 128` ou `256`, modelo padrão, e experimente `--torch-threads` = núcleos físicos |
+| CPU / Intel Iris / AMD / Apple | `--device cpu --tile 128` ou `256`, modelo padrão, e veja a dica de threads abaixo |
 
 - **Faltou memória?** Corte o `--tile` pela metade. É o principal controle de memória.
 - **Para onde vai o tempo?** Use `--debug-timings`. Muito tempo em `queue` indica que a
   leitura (o perfil) é o gargalo; em `ai`, o modelo; em `write`, o encoder (tente
   `--encoder nvenc` ou um `--x264-preset` mais rápido).
-- **O modelo pesa mais que qualquer outra opção:** o `realesr-animevideov3` é muitas vezes
-  mais rápido que os modelos `x4plus`.
+- **O modelo pesa mais que qualquer outra opção:** o `realesr-animevideov3` foi cerca de 27x
+  mais rápido que o `realesrgan-x4plus` numa CPU nos nossos testes.
+- **O `--scale` quase não muda a velocidade.** Os modelos sempre ampliam 4x internamente e
+  só redimensionam para a sua escala no fim, então gerar 1080p custa praticamente o mesmo
+  tempo de IA que 720p.
+- **Mais threads de CPU nem sempre é mais rápido.** Em notebooks que misturam núcleos de
+  desempenho e de eficiência, um `--torch-threads` menor (algo como 4–6) pode ganhar de usar
+  todos. Teste alguns valores com `--max-frames 10`. E deixe o notebook na tomada e fora do
+  modo de economia de energia.
 - Na CPU, espere algo na casa de segundos por frame, e não de frames por segundo. Teste
   antes com `--max-frames` para estimar o tempo total.
 
