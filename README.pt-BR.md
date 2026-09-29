@@ -22,6 +22,14 @@ qualidade, para que o vídeo final continue fiel ao original.
 framelift -i vovo_1998.mp4 -o vovo_1998_hd.mp4 --profile old_tv --scale 2
 ```
 
+   ## Antes / Depois
+
+   ![Antes and depois, com zoom](docs/demo_zoom.gif)
+
+   ![Antes e depois, sem zoom](docs/demo_full.gif)
+
+   <sub>Gravação antiga em preto e branco, 480p → 1080p, melhorada num notebook usando CPU.</sub>
+
 ## Destaques
 
 - **Funciona em qualquer máquina.** Usa CUDA quando disponível e cai para a CPU quando

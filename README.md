@@ -22,6 +22,14 @@ the original footage.
 framelift -i grandma_1998.mp4 -o grandma_1998_hd.mp4 --profile old_tv --scale 2
 ```
 
+   ## Before / after
+
+   ![Before and after, zoomed in](docs/demo_zoom.gif)
+
+   ![Before and after, full frame](docs/demo_full.gif)
+
+   <sub>Old black-and-white concert footage, 480p → 1080p, enhanced on a laptop CPU.</sub>
+
 ## Highlights
 
 - **Works on any machine.** Uses CUDA when available and falls back to the CPU
