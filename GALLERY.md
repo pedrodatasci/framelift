@@ -17,6 +17,7 @@ area; open **Full frame** to see the whole picture.
 ## Contents
 
 - [Live rock show](#live-rock-show)
+- [Bassist on stage](#bassist-on-stage)
 - [Color music video](#color-music-video)
 - [Black-and-white concert footage](#black-and-white-concert-footage)
 - [Add your own](#add-your-own)
@@ -35,6 +36,20 @@ The motion blur stays, because no upscaler can undo it. 480p → 1080p.
 ![Before and after: live rock show, full frame](docs/gallery/live_show_full.gif)
 
 </details>
+
+## Bassist on stage
+
+   A source that already looks decent: fret markers, strings and fingers come out sharper,
+   and edges are cleaner. 720p → 1080p.
+
+   ![Before and after: bassist on stage, zoomed in](docs/gallery/pixies_zoom.gif)
+
+   <details>
+   <summary>Full frame</summary>
+
+   ![Before and after: bassist on stage, full frame](docs/gallery/pixies_full.gif)
+
+   </details>
 
 ## Color music video
 

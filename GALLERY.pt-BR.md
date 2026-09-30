@@ -17,6 +17,7 @@ detalhada; abra **Frame inteiro** para ver a imagem completa.
 ## Sumário
 
 - [Show de rock ao vivo](#show-de-rock-ao-vivo)
+- [Baixista no palco](#baixista-no-palco)
 - [Clipe musical colorido](#clipe-musical-colorido)
 - [Gravação de show em preto e branco](#gravação-de-show-em-preto-e-branco)
 - [Adicione os seus](#adicione-os-seus)
@@ -35,6 +36,20 @@ de movimento continua, porque nenhum upscaler consegue desfazê-lo. 480p → 108
 ![Antes e depois: show de rock ao vivo, frame inteiro](docs/gallery/live_show_full.gif)
 
 </details>
+
+   ## Baixista no palco
+
+   Uma fonte que já tem boa qualidade: os marcadores dos trastes, as cordas e os dedos ficam
+   mais nítidos, e as bordas, mais limpas. 720p → 1080p.
+
+   ![Antes e depois: baixista no palco, com zoom](docs/gallery/pixies_zoom.gif)
+
+   <details>
+   <summary>Frame inteiro</summary>
+
+   ![Antes e depois: baixista no palco, frame inteiro](docs/gallery/pixies_full.gif)
+
+   </details>
 
 ## Clipe musical colorido
 
