@@ -8,7 +8,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[English 🇺🇸](README.md)
+[English 🇺🇸](README.md) · [🎬 Mais exemplos](GALLERY.pt-BR.md)
 
 </div>
 
@@ -52,6 +52,8 @@ mais nítidas. Processado na CPU de um notebook.
 
 <sub>Os GIFs são comprimidos e reduzidos para esta página; o MP4 real gerado é mais nítido.</sub>
 
+**[🎬 Mais exemplos na galeria →](GALLERY.pt-BR.md)**
+
 ## Destaques
 
 - **Funciona em qualquer máquina.** Usa CUDA quando disponível e cai para a CPU quando
@@ -72,7 +74,7 @@ mais nítidas. Processado na CPU de um notebook.
 
 ## Sumário
 
-- [Antes / depois](#antes--depois)
+- [Antes / depois](#antes--depois) (e [mais exemplos](GALLERY.pt-BR.md))
 - [Como funciona](#como-funciona)
 - [Instalação](#instalação)
 - [Primeiros passos](#primeiros-passos)
@@ -685,6 +687,9 @@ framelift/
 │   └── errors.py      # hierarquia de exceções
 ├── tests/             # testes com pytest (rodam sem PyTorch)
 ├── examples/          # exemplos de uso executáveis
+├── scripts/           # make_comparison.py: GIFs de antes/depois para a galeria
+├── docs/              # imagens e GIFs usados pelos READMEs e pela galeria
+├── GALLERY.md         # mais exemplos de antes/depois
 └── main.py            # ponto de entrada compatível com a versão antiga
 ```
 

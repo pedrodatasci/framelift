@@ -8,7 +8,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[Português 🇧🇷](README.pt-BR.md)
+[Português 🇧🇷](README.pt-BR.md) · [🎬 More examples](GALLERY.md)
 
 </div>
 
@@ -52,6 +52,8 @@ Enhanced on a laptop CPU.
 
 <sub>GIFs are compressed and scaled down for this page; the real MP4 output is sharper.</sub>
 
+**[🎬 More examples in the gallery →](GALLERY.md)**
+
 ## Highlights
 
 - **Works on any machine.** Uses CUDA when available and falls back to the CPU
@@ -72,7 +74,7 @@ Enhanced on a laptop CPU.
 
 ## Contents
 
-- [Before / after](#before--after)
+- [Before / after](#before--after) (and [more examples](GALLERY.md))
 - [How it works](#how-it-works)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -682,6 +684,9 @@ framelift/
 │   └── errors.py      # exception hierarchy
 ├── tests/             # pytest suite (runs without PyTorch)
 ├── examples/          # runnable usage examples
+├── scripts/           # make_comparison.py: before/after GIFs for the gallery
+├── docs/              # images and GIFs used by the READMEs and the gallery
+├── GALLERY.md         # more before/after examples
 └── main.py            # backwards-compatible entry point
 ```
 

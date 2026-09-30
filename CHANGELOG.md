@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Gallery** (`GALLERY.md` / `GALLERY.pt-BR.md`): a separate page with more before/after
+  examples, linked from the top of both READMEs. It starts with a new live-show example.
+- `scripts/make_comparison.py`: turns an original video and framelift's output into the
+  gallery's GIFs. It picks the sharpest steady scene and its most detailed area, keeps each
+  GIF under 6 MB, and prints the Markdown to paste into the gallery.
+
 ## [1.2.0] — 2026-09-29
 
 ### Added
