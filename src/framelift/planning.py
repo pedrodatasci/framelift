@@ -111,6 +111,10 @@ class EnhanceResult:
 
     elapsed_seconds: float = 0.0
 
+    audio: str = "disabled"
+    """``"copied"``, ``"converted"`` (to AAC), ``"none"`` (the input has no audio),
+    ``"failed"`` (the video was saved silent) or ``"disabled"``."""
+
     @property
     def is_complete(self) -> bool:
         """True if the output reaches the end of the input video."""

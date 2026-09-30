@@ -85,6 +85,9 @@ class EnhanceOptions:
     """Where model weights are stored (and downloaded to on first use)."""
 
     # --- Encoding ------------------------------------------------------------
+    audio: bool = True
+    """Copy the input's audio into the output (trimmed to the enhanced part)."""
+
     encoder: str = "cpu"
     """``cpu`` (libx264) or ``nvenc`` (NVIDIA hardware, falls back to cpu)."""
 

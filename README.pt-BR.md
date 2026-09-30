@@ -61,6 +61,8 @@ mais nítidas. Processado na CPU de um notebook.
 - **Pare quando quiser, sem perder nada.** Aperte <kbd>Ctrl</kbd>+<kbd>C</kbd> uma vez e o
   framelift termina o frame atual e salva um MP4 **reproduzível** com tudo o que já foi
   feito. Depois ele diz exatamente como continuar.
+- **Mantém o som.** O áudio original é copiado sincronizado, recortado no trecho
+  processado, sem recodificar sempre que possível.
 - **Resultado natural.** O `--ai-strength` regula a mistura, de "limpeza sutil" até
   "IA total".
 - **Perfis de pré-limpeza** para fontes comuns: vídeo de celular, gravações de VHS/TV,
@@ -85,7 +87,7 @@ mais nítidas. Processado na CPU de um notebook.
 - [Perfis de pré-limpeza](#perfis-de-pré-limpeza)
 - [Ajuste de desempenho](#ajuste-de-desempenho)
 - [Parar, retomar e juntar partes](#parar-retomar-e-juntar-partes)
-- [Recolocando o áudio](#recolocando-o-áudio)
+- [Áudio](#áudio)
 - [API Python](#api-python)
 - [Solução de problemas](#solução-de-problemas)
 - [Estrutura do projeto](#estrutura-do-projeto)
@@ -156,10 +158,6 @@ framelift -i entrada.mp4 -o saida.mp4
 
 Os padrões são um bom ponto de partida: o modelo rápido `realesr-animevideov3`, upscale
 de 1,5x e 45% de IA na mistura.
-
-> [!NOTE]
-> A saída é um MP4 **sem áudio**. Veja [Recolocando o áudio](#recolocando-o-áudio) para
-> resolver com um comando.
 
 ## Descobrindo as melhores configurações (`framelift tune`)
 
@@ -320,6 +318,7 @@ framelift -i ENTRADA -o SAIDA [opções]
 | --- | --- | --- |
 | `-i`, `--input VIDEO` | *obrigatório* | Vídeo a melhorar. Qualquer formato que OpenCV/FFmpeg leiam (MP4, MKV, AVI, MOV…). |
 | `-o`, `--output MP4` | *obrigatório* | Onde salvar o resultado. Pastas inexistentes são criadas. Um arquivo que já exista nesse caminho **só** é substituído quando o novo termina com sucesso. |
+| `--no-audio` | áudio ligado | Deixa o áudio de fora. Por padrão, o áudio da entrada é copiado, recortado no trecho processado. Veja [Áudio](#áudio). |
 
 ### Aparência do resultado
 
@@ -474,7 +473,8 @@ Para continuar, rode o mesmo comando com um **novo nome de saída** e o frame su
 framelift -i in.mp4 -o parte2.mp4 --start-frame 1201
 ```
 
-Depois junte as partes sem perda de qualidade com o FFmpeg:
+Depois junte as partes sem perda de qualidade com o FFmpeg (cada parte leva o próprio
+trecho de áudio, então o arquivo final continua sincronizado):
 
 ```bash
 printf "file 'out.mp4'\nfile 'parte2.mp4'\n" > partes.txt
@@ -485,16 +485,26 @@ ffmpeg -f concat -safe 0 -i partes.txt -c copy completo.mp4
 > `--start-frame` junto com `--max-frames` permite dividir de propósito um trabalho longo
 > em sessões, por exemplo 5000 frames por noite.
 
-## Recolocando o áudio
+## Áudio
 
-O framelift grava só o vídeo. Copie o áudio do original sem recodificar:
+O framelift copia o áudio da entrada para a saída automaticamente, sincronizado:
 
-```bash
-ffmpeg -i saida.mp4 -i entrada.mp4 -map 0:v -map 1:a? -c copy -shortest final.mp4
-```
+- **Só o trecho correspondente.** Com `--start-frame`, `--max-frames`, ou depois de um
+  <kbd>Ctrl</kbd>+<kbd>C</kbd>, o áudio cobre exatamente os frames processados. Partes
+  feitas assim podem ser [juntadas](#parar-retomar-e-juntar-partes) e continuam sincronizadas.
+- **Sem perda de qualidade quando possível.** AAC, MP3, AC-3 e E-AC-3 são copiados como
+  estão. Outros codecs (como o áudio PCM comum em capturas AVI ou MOV) são convertidos para
+  AAC a 192 kbps, porque muitos players não conseguem tocá-los dentro de um MP4.
+- **O vídeo nunca corre risco.** O áudio entra numa segunda passada rápida, depois que o
+  vídeo está pronto. Se a entrada não tiver áudio, a saída sai sem som; se algo falhar ao
+  adicioná-lo, o vídeo é salvo mesmo assim, sem som e com um aviso.
 
-O `?` faz o comando funcionar mesmo se a entrada não tiver áudio. O sincronismo fica
-correto quando a saída cobre o vídeo inteiro (a partir do frame 1).
+Use `--no-audio` para deixar o áudio de fora (`audio=False` em Python). Em Python,
+`result.audio` diz o que aconteceu: `"copied"` (copiado), `"converted"` (convertido),
+`"none"` (a entrada não tem áudio), `"failed"` (falhou) ou `"disabled"` (desligado). Nos
+nossos testes, o áudio ficou alinhado com
+o vídeo com diferença abaixo de um milissegundo, inclusive depois de juntar partes e de
+converter 30 → 60 fps.
 
 ## API Python
 
@@ -632,6 +642,11 @@ Mais exemplos em [`examples/`](examples/).
 
 ## Solução de problemas
 
+**A saída saiu sem som**: confira as mensagens no fim da execução. Se a entrada não tiver
+trilha de áudio, o framelift avisa. Se algo falhou ao adicionar o áudio, ele mostra um
+aviso; rode de novo com `-v` para ver o erro do FFmpeg. O framelift também precisa do
+`ffprobe`, que vem junto com o FFmpeg, para ler o áudio.
+
 **`Couldn't find 'ffmpeg' on your PATH`**: instale o FFmpeg e abra um terminal novo. No
 Windows, adicione ao `PATH` a pasta que contém o `ffmpeg.exe`.
 
@@ -710,9 +725,12 @@ A CI roda a suíte rápida e o linter no Python 3.9–3.12 a cada push.
 ## Vindo do antigo `main.py`
 
 Nada quebra: toda flag manteve nome e valor padrão, e `python main.py …` continua
-funcionando. A saída foi verificada frame a frame (MD5 de cada frame decodificado) contra
+funcionando. O vídeo foi verificado frame a frame (MD5 de cada frame decodificado) contra
 o script original, com vários perfis, escalas, conversão de frame rate, retomada e
-configurações de tile. O que mudou, incluindo algumas correções de bugs, está no
+configurações de tile. A única diferença na saída é bem-vinda: agora ela mantém o áudio
+(use `--no-audio` para ter o MP4 sem som de antes).
+
+O que mudou, incluindo algumas correções de bugs, está no
 [CHANGELOG](CHANGELOG.md).
 
 ## Créditos e licença

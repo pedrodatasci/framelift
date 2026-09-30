@@ -4,15 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.0] — 2026-09-29
 
 ### Added
 
+- **The audio is kept.** The input's audio is copied into the output automatically,
+  trimmed to exactly the enhanced frames (`--start-frame`, `--max-frames`, Ctrl+C), in sync
+  to within a millisecond, including across joined parts and 30 → 60 fps conversion.
+  AAC, MP3, AC-3 and E-AC-3 are copied without re-encoding; other codecs (e.g. PCM from
+  capture cards) are converted to AAC 192 kbps so every player can play them.
+  `--no-audio` (or `audio=False`) turns it off, and `EnhanceResult.audio` reports what
+  happened. The audio is added in a second pass after the video is finished, so a problem
+  with it never costs the video: the MP4 is saved silent, with a warning.
 - **Gallery** (`GALLERY.md` / `GALLERY.pt-BR.md`): a separate page with more before/after
-  examples, linked from the top of both READMEs. It starts with a new live-show example.
+  examples, linked from the top of both READMEs.
 - `scripts/make_comparison.py`: turns an original video and framelift's output into the
   gallery's GIFs. It picks the sharpest steady scene and its most detailed area, keeps each
   GIF under 6 MB, and prints the Markdown to paste into the gallery.
+
+### Changed
+
+- By default the output now has audio. The video stream is still bit-identical to the
+  original script's; `--no-audio` gives the old silent MP4.
 
 ## [1.2.0] — 2026-09-29
 

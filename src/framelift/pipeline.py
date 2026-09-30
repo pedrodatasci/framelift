@@ -22,6 +22,7 @@ from typing import Callable, Union
 
 from tqdm import tqdm
 
+from .audio import add_audio
 from .device import (
     Device,
     configure_torch,
@@ -216,6 +217,7 @@ class VideoEnhancer:
                 log.info("Stopping early — finishing the MP4 with the %d frames done…", processed)
 
             writer.finish()
+            audio = self._add_audio(plan, output_path, processed) if opts.audio else "disabled"
             finished = True
 
         finally:
@@ -232,8 +234,24 @@ class VideoEnhancer:
             frames_written=writer.frames_written,
             total_frames=plan.video.frame_count,
             interrupted=interrupted,
+            audio=audio,
             elapsed_seconds=time.perf_counter() - started_at,
         )
+
+    def _add_audio(self, plan: RunPlan, output_path: Path, processed: int) -> str:
+        """Copy the stretch of the input's audio that matches the enhanced frames."""
+        fps = plan.video.fps
+        outcome = add_audio(
+            output_path,
+            plan.video.path,
+            start_seconds=(plan.start_frame - 1) / fps,
+            duration_seconds=processed / fps,
+        )
+        if outcome == "copied":
+            log.info("Kept the original audio.")
+        elif outcome == "converted":
+            log.info("Kept the audio, converted to AAC (its codec doesn't fit in an MP4).")
+        return outcome
 
     def _enhance_frame(
         self,

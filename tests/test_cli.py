@@ -81,3 +81,13 @@ def test_tune_requires_an_input():
     with pytest.raises(SystemExit) as exc:
         main(["tune"])
     assert exc.value.code == 2
+
+
+def test_audio_is_on_by_default_and_can_be_turned_off():
+    from framelift.cli import options_to_args
+
+    default = build_parser().parse_args(["-i", "a", "-o", "b"])
+    silent = build_parser().parse_args(["-i", "a", "-o", "b", "--no-audio"])
+    assert options_from_args(default).audio is True
+    assert options_from_args(silent).audio is False
+    assert options_to_args(EnhanceOptions(audio=False)) == ["--no-audio"]

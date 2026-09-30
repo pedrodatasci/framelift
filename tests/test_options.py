@@ -11,6 +11,7 @@ def test_defaults_match_the_original_script():
     assert (o.encoder, o.crf, o.x264_preset, o.prefetch) == ("cpu", 20, "veryfast", 2)
     assert (o.start_frame, o.max_frames, o.output_fps) == (1, None, None)
     assert (o.timing_every, o.gc_every, o.weights_dir) == (20, 0, "weights")
+    assert o.audio is True
     o.validate()
 
 

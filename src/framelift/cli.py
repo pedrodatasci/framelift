@@ -58,9 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     files = parser.add_argument_group("input / output")
     files.add_argument("-i", "--input", metavar="VIDEO", help="Video to enhance.")
+    files.add_argument("-o", "--output", metavar="MP4", help="Where to save the result (MP4).")
     files.add_argument(
-        "-o", "--output", metavar="MP4", help="Where to save the result (silent MP4)."
-    )
+        "--no-audio", dest="audio", action="store_false",
+        help="Leave the audio out. By default the input's audio is copied over, "
+             "trimmed to match the enhanced part.",
+    )  # fmt: skip
 
     look = parser.add_argument_group("how the result looks")
     look.add_argument(
@@ -287,7 +290,8 @@ def options_to_args(options: EnhanceOptions) -> list[str]:
 
         flag = "--" + name.replace("_", "-")
         if isinstance(value, bool):
-            args.append(flag)  # every boolean option defaults to False
+            # Options that are on by default are turned off with --no-<name>.
+            args.append(flag if value else "--no-" + name.replace("_", "-"))
         elif isinstance(value, float):
             args += [flag, f"{value:g}"]
         else:
@@ -392,6 +396,9 @@ def _report(result) -> None:
         minutes,
         seconds,
     )
+
+    if result.audio in {"copied", "converted"}:
+        log.info("  with the original audio%s", " (as AAC)" if result.audio == "converted" else "")
 
     if result.resume_from is not None:
         log.info("To continue from here, run again with:  --start-frame %d", result.resume_from)

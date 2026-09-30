@@ -61,6 +61,8 @@ Enhanced on a laptop CPU.
 - **Stop anytime, lose nothing.** Press <kbd>Ctrl</kbd>+<kbd>C</kbd> once and framelift
   finishes the current frame and saves a **playable** MP4 of everything done so far.
   It then tells you exactly how to resume.
+- **Keeps the sound.** The original audio is copied over in sync, trimmed to the part
+  that was enhanced, without re-encoding whenever possible.
 - **Natural-looking results.** The `--ai-strength` blend lets you dial in anything from
   "subtle cleanup" to "full AI".
 - **Pre-cleaning profiles** for common sources: phone footage, VHS/TV captures, very
@@ -85,7 +87,7 @@ Enhanced on a laptop CPU.
 - [Pre-cleaning profiles](#pre-cleaning-profiles)
 - [Performance tuning](#performance-tuning)
 - [Stopping, resuming and joining parts](#stopping-resuming-and-joining-parts)
-- [Adding the audio back](#adding-the-audio-back)
+- [Audio](#audio)
 - [Python API](#python-api)
 - [Troubleshooting](#troubleshooting)
 - [Project layout](#project-layout)
@@ -155,10 +157,6 @@ framelift -i input.mp4 -o output.mp4
 
 The defaults are a good starting point: the fast `realesr-animevideov3` model, a 1.5x
 upscale and a 45% AI blend.
-
-> [!NOTE]
-> The output is a **silent** MP4. See [Adding the audio back](#adding-the-audio-back)
-> for a one-line fix.
 
 ## Finding the best settings (`framelift tune`)
 
@@ -318,6 +316,7 @@ Run `framelift --help` for the same information in your terminal.
 | --- | --- | --- |
 | `-i`, `--input VIDEO` | *required* | Video to enhance. Anything OpenCV/FFmpeg can read (MP4, MKV, AVI, MOV…). |
 | `-o`, `--output MP4` | *required* | Where to save the result. Parent folders are created automatically. An existing file at this path is replaced **only** once the new one has finished successfully. |
+| `--no-audio` | audio on | Leave the audio out. By default the input's audio is copied over, trimmed to match the enhanced part. See [Audio](#audio). |
 
 ### How the result looks
 
@@ -470,7 +469,8 @@ To continue, run the same command with a **new output name** and the suggested s
 framelift -i in.mp4 -o part2.mp4 --start-frame 1201
 ```
 
-Then join the parts losslessly with FFmpeg:
+Then join the parts losslessly with FFmpeg (each part carries its own stretch of audio,
+so the joined file stays in sync):
 
 ```bash
 printf "file 'out.mp4'\nfile 'part2.mp4'\n" > parts.txt
@@ -481,16 +481,24 @@ ffmpeg -f concat -safe 0 -i parts.txt -c copy joined.mp4
 > `--start-frame` together with `--max-frames` lets you split a long job into sessions
 > on purpose, e.g. 5000 frames per night.
 
-## Adding the audio back
+## Audio
 
-framelift writes video only. Copy the audio from the original without re-encoding:
+framelift copies the input's audio into the output automatically, in sync:
 
-```bash
-ffmpeg -i output.mp4 -i input.mp4 -map 0:v -map 1:a? -c copy -shortest final.mp4
-```
+- **Only the matching stretch.** With `--start-frame`, `--max-frames`, or after a
+  <kbd>Ctrl</kbd>+<kbd>C</kbd>, the audio covers exactly the frames that were enhanced.
+  Parts made this way can be [joined](#stopping-resuming-and-joining-parts) and stay in sync.
+- **No quality loss when possible.** AAC, MP3, AC-3 and E-AC-3 are copied as they are.
+  Other codecs (like the PCM audio common in AVI or MOV captures) are converted to AAC at
+  192 kbps, because many players can't play them inside an MP4.
+- **The video is never at risk.** The audio is added in a quick second pass after the video
+  is finished. If the input has no audio, the output is silent; if adding it fails, the
+  video is still saved, silent, with a warning.
 
-The `?` makes it work even if the input has no audio. This lines up correctly when the
-output covers the whole video (from frame 1).
+Use `--no-audio` to leave it out (`audio=False` in Python). From Python, `result.audio`
+tells you what happened: `"copied"`, `"converted"`, `"none"` (no audio in the input),
+`"failed"` or `"disabled"`. In our tests, the audio lined up with the video to
+within a millisecond, including after joining parts and after converting 30 → 60 fps.
 
 ## Python API
 
@@ -629,6 +637,11 @@ More in [`examples/`](examples/).
 
 ## Troubleshooting
 
+**No sound in the output** — Check the messages at the end of the run. If the input has
+no audio track, framelift says so. If adding the audio failed, it prints a warning; run
+again with `-v` to see FFmpeg's error. framelift also needs `ffprobe`, which comes with
+FFmpeg, to read the audio.
+
 **`Couldn't find 'ffmpeg' on your PATH`** — Install FFmpeg and open a new terminal.
 On Windows, add the folder containing `ffmpeg.exe` to `PATH`.
 
@@ -707,9 +720,12 @@ CI runs the fast suite and the linter on Python 3.9–3.12 for every push.
 ## Coming from the old `main.py`
 
 Nothing breaks: every flag kept its name and default, and `python main.py …` still
-works. The output was verified frame by frame (MD5 of every decoded frame) against the
+works. The video was verified frame by frame (MD5 of every decoded frame) against the
 original script across profiles, scales, frame-rate conversion, resume and tiling
-settings. What changed — including a few bug fixes — is listed in the
+settings. The one difference in the output is welcome: it now keeps the audio (add
+`--no-audio` for the old silent MP4).
+
+What changed — including a few bug fixes — is listed in the
 [CHANGELOG](CHANGELOG.md).
 
 ## Credits and license

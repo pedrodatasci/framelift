@@ -123,3 +123,28 @@ def test_tune_video_anime_uses_the_anime_model(make_video, options):
 
     report = tune_video(make_video(frames=8), options, content="anime", benchmark=False)
     assert report.presets["best"].options.model == "realesrgan-x4plus-anime-6B"
+
+
+def test_enhance_video_keeps_the_audio(tmp_path, options):
+    import subprocess
+
+    source = tmp_path / "with_audio.mp4"
+    subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=24",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "1",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(source)],
+        check=True,
+    )  # fmt: skip
+
+    with_audio = enhance_video(source, tmp_path / "a.mp4", options, max_frames=6,
+                               show_progress=False)  # fmt: skip
+    without = enhance_video(source, tmp_path / "b.mp4", options, max_frames=6, audio=False,
+                            show_progress=False)  # fmt: skip
+
+    assert with_audio.audio == "copied"
+    assert without.audio == "disabled"
+
+
+def test_input_without_audio_reports_none(make_video, tmp_path, options):
+    result = enhance_video(make_video(frames=4), tmp_path / "o.mp4", options, show_progress=False)
+    assert result.audio == "none"
