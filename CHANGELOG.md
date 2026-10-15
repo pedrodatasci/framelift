@@ -4,6 +4,112 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-10-10
+
+### Added
+
+- **`framelift tune` tries more ways to run the AI, and keeps the fastest:**
+  - **OpenVINO on the CPU** (`--backend openvino`), Intel's runtime, against PyTorch with
+    the tile and threads that already won;
+  - **the Intel GPU** (`--device igpu`: Iris, UHD, Arc, through OpenVINO), with tile
+    sizes and FP16 on and off, when OpenVINO can see one;
+  - **2 AI workers** (`--workers 2`) against 1, on CPUs with 4 threads or more, with two
+    short real runs (5 frames each). 2 are kept only if at least 5% faster.
+
+  The report lists every configuration tried ("OpenVINO, tile 256", "Intel GPU, tile 512,
+  FP16", "Real run, 2 workers × 4 threads ← faster"). OpenVINO is optional: without it,
+  those tests are skipped.
+- **`--device igpu`**: run the AI on an Intel GPU through OpenVINO. `auto` never picks
+  it by itself; `tune` checks whether it's actually faster than the CPU.
+- **`--backend {torch,openvino}`**: what runs the AI on the CPU. In our tests OpenVINO was
+  ~13% faster on the default model (speed test) and ~20% on `realesrgan-x4plus`.
+- **`--workers N`**: frames the AI works on at the same time, each with its share of the
+  CPU threads (`--torch-threads` is now per worker; `0` splits PyTorch's default).
+- Optional dependency group `intel` (`pip install -e ".[intel]"`, installs OpenVINO).
+- Python API: `BenchmarkRun.device` / `.backend`, `RealRun.workers` / `.threads`,
+  `TuneReport.real_runs`, `AIUpscaler.infer()` / `.finish()`.
+
+### Changed
+
+- **The AI runs in its own thread(s).** While it works on the next frame, the previous one
+  is resized, blended and encoded, so the two overlap on machines with cores to spare.
+  On a single core it's a draw (55.7 s vs 56.3 s for 12 frames in our tests).
+- **framelift now runs the Real-ESRGAN networks itself** instead of through
+  `RealESRGANer.enhance`: same tiling, padding and rounding (the output is bit-for-bit the
+  same, checked against `RealESRGANer` in the tests), but with no state between calls, so
+  several threads can share one model, and no per-tile console output to hide. The
+  conversion back to 8 bits now happens on the device (on CUDA, 4x less to copy back).
+- `--debug-timings`: `ai` is now the time spent *waiting* for the AI (it runs in parallel
+  with the rest); `queue` is still the wait for the reader.
+- `--torch-threads 0` now restores PyTorch's default instead of keeping whatever an earlier
+  call in the same process had set.
+- The "FP16 only applies to CUDA" note now says "GPUs" (it applies to `igpu` too).
+
+### Compatibility
+
+- Every flag, default and API from 1.4 still works the same, and with the defaults the
+  output is bit-for-bit identical to 1.4, with 1 worker or 2.
+- `--backend openvino` and `--device igpu` round a few values differently from PyTorch (at
+  most 1 level out of 255 on CPU; FP16 on the Intel GPU, like `--half` on NVIDIA).
+- OpenVINO caches compiled models in `<weights dir>/openvino_cache/` (already ignored by
+  git, with the rest of `weights/`).
+
+## [1.4.0] — 2026-10-10
+
+### Added
+
+- **Choose the part to enhance on a timeline: `framelift trim`.** A player window (VLC
+  does the playback, Tkinter draws the window) shows the video above a timeline with a
+  start and an end handle. Drag them, or use the keys (<kbd>I</kbd>/<kbd>O</kbd> at the
+  playhead, arrows for one frame or, with <kbd>Shift</kbd>, one second, <kbd>Space</kbd>,
+  "Play selection"), and confirm with <kbd>Enter</kbd>.
+- **The chosen part becomes the input.** It's saved as a new file,
+  `<input>_trim_<first>-<last frame>.mp4` (the original is never touched), so
+  `--start-frame`, `--max-frames` and resuming after a stop refer to it. The cut:
+  - starts and ends on the exact frames chosen, even between keyframes, and has exactly
+    the same pixels as the original (lossless H.264, verified by MD5 of every frame);
+  - keeps the audio in sync to the sample (lossless ALAC; converted to AAC in the
+    enhanced output);
+  - falls back to decoding from the start when seeking can't land exactly (e.g. MPEG-TS
+    captures with few keyframes).
+- **`--pick-range`** on the main command: pick, cut and enhance in one go. If the run
+  stops, the resume hint points at the cut; picking the same range again reuses it.
+- **`framelift trim --start/--end`**: the same cut by time, with no window (servers, SSH).
+- Python API: `pick_range()`, `trim_video()`, `FrameRange` and `TrimResult`.
+- Optional dependency group `picker` (`pip install -e ".[picker]"`, installs python-vlc).
+  VLC itself is only needed for the window; nothing else in framelift needs it.
+- `framelift tune` reports a **short real run** (`TuneReport.real_run`) and each preset's
+  `basis` (`"measured"` or `"extrapolated"`).
+
+### Changed
+
+- **The default model is about 30% faster on CPU.** `realesr-animevideov3` now runs with
+  its weights in channels-last layout, oneDNN's native one: 8.3 → 5.8 s per 720x480 frame
+  in our tests, end to end. The RRDB models (`x4plus` and friends) were slower that way,
+  so they're unchanged, as is everything on GPU.
+- **`framelift tune` estimates times from a real run.** Three frames go through the whole
+  pipeline with the preset's settings, so the estimates now include reading, clean-up,
+  blending, encoding (with the encoder competing for the CPU) and loading the model. In our
+  tests a 40-frame run took 7% longer than estimated (it used to be about 15% with the AI
+  alone). On GPU both presets are timed this way; on CPU, `best` is built from one timed
+  tile of the heavy model scaled to the frame's exact tiling, instead of from the ratio of
+  two small crops.
+- **`framelift tune` measures the AI's effect more carefully**: on crops from three
+  frames instead of two, and with real picture around each crop (trimmed afterwards), so
+  the AI and the clean-up filters don't react to artificial borders. On our test clip the
+  third frame moved the suggested strength from 0.5 to 0.6; the context changed little.
+- `--no-benchmark` also skips the short real run.
+- The report's "Times are rough" note is replaced by what the times include.
+- Docs: the CPU speed ratio between the default model and `realesrgan-x4plus` is now
+  about 45x (it was 27x before the default model got faster).
+
+### Compatibility
+
+- Every flag, default and API from 1.3 still works the same.
+- On **CPU with the default model**, the output is no longer bit-identical to the
+  original script: the new memory layout rounds differently in about 0.002% of the
+  values, by at most 1 level out of 255. GPU runs and the other models are unaffected.
+
 ## [1.3.0] — 2026-09-29
 
 ### Added

@@ -48,3 +48,10 @@ def test_validate_rejects_impossible_values(bad):
 
 def test_scale_is_irrelevant_with_same_resolution():
     EnhanceOptions(scale=0, same_resolution=True).validate()
+
+
+def test_workers_and_backend_are_validated():
+    EnhanceOptions(workers=2, backend="openvino", device="igpu").validate()
+    for bad in ({"workers": 0}, {"workers": 99}, {"backend": "onnx"}):
+        with pytest.raises(InvalidOptionError):
+            EnhanceOptions(**bad).validate()

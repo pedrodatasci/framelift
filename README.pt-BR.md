@@ -63,10 +63,17 @@ mais nítidas. Processado na CPU de um notebook.
   feito. Depois ele diz exatamente como continuar.
 - **Mantém o som.** O áudio original é copiado sincronizado, recortado no trecho
   processado, sem recodificar sempre que possível.
+- **Escolha no olho o trecho a melhorar.** O `framelift trim` (ou `--pick-range`) abre um
+  player com linha do tempo: arraste o início e o fim, e esse trecho é cortado no frame
+  exato, sem perder qualidade, e vira a sua entrada.
 - **Resultado natural.** O `--ai-strength` regula a mistura, de "limpeza sutil" até
   "IA total".
 - **Perfis de pré-limpeza** para fontes comuns: vídeo de celular, gravações de VHS/TV,
   vídeo com muito ruído.
+- **Usa o que a sua máquina tem.** Além de GPUs NVIDIA, roda a IA em GPUs Intel (Iris,
+  UHD, Arc) e, pelo OpenVINO da Intel, em qualquer CPU; em CPUs com muitos núcleos, pode
+  trabalhar em dois frames ao mesmo tempo. O `framelift tune` mede o que é mais rápido na
+  *sua* máquina.
 - **Pipeline rápido.** Os frames são decodificados numa thread em segundo plano enquanto
   a IA trabalha, e vão direto para o FFmpeg, sem arquivos de imagem temporários no disco.
 - **Conversão de frame rate.** Transforme 24/30 fps em 60 fps sem mudar a duração.
@@ -81,6 +88,7 @@ mais nítidas. Processado na CPU de um notebook.
 - [Instalação](#instalação)
 - [Primeiros passos](#primeiros-passos)
 - [Descobrindo as melhores configurações (`framelift tune`)](#descobrindo-as-melhores-configurações-framelift-tune)
+- [Escolhendo o trecho a melhorar (`framelift trim`)](#escolhendo-o-trecho-a-melhorar-framelift-trim)
 - [Receitas](#receitas)
 - [Referência da linha de comando](#referência-da-linha-de-comando)
 - [Modelos](#modelos)
@@ -100,14 +108,16 @@ mais nítidas. Processado na CPU de um notebook.
 ```
 ┌───────────────┐   fila   ┌─────────────┐      ┌─────────────────┐  pipe   ┌────────┐
 │ thread leitora│ ───────► │ Real-ESRGAN │ ───► │ mistura com     │ ──────► │ FFmpeg │ ──► saida.mp4
-│ decodifica +  │(prefetch)│  (GPU/CPU)  │      │ resize Lanczos  │  (raw)  │  H.264 │
+│ decodifica +  │(prefetch)│  (workers)  │      │ resize Lanczos  │  (raw)  │  H.264 │
 │ limpa         │          └─────────────┘      └─────────────────┘         └────────┘
 └───────────────┘
 ```
 
 1. **Leitura e pré-limpeza.** Uma thread em segundo plano decodifica os frames e aplica o
    [perfil](#perfis-de-pré-limpeza) escolhido, ficando alguns frames à frente da IA.
-2. **Upscale.** O Real-ESRGAN recupera detalhes e amplia o frame até o tamanho final.
+2. **Upscale.** O Real-ESRGAN recupera detalhes e amplia o frame até o tamanho final. Ele
+   roda na própria thread (ou em várias, com `--workers`), então a IA já está no próximo
+   frame enquanto o anterior é misturado e codificado.
 3. **Mistura.** O resultado da IA é combinado com um resize Lanczos comum do mesmo frame,
    na proporção definida por `--ai-strength`.
 4. **Codificação.** Os frames crus vão por pipe para o FFmpeg (libx264 ou NVENC). O arquivo
@@ -143,6 +153,22 @@ framelift --version
 
 Isso cria o comando `framelift`. `python -m framelift` também funciona.
 
+**Opcional, para hardware Intel:** `pip install -e ".[intel]"` instala o
+[OpenVINO](https://docs.openvino.ai), que permite rodar a IA numa GPU Intel (Iris, UHD,
+Arc) com `--device igpu`, ou na CPU com `--backend openvino` (muitas vezes mais rápido que o
+PyTorch, em qualquer CPU x86). Com ele instalado, o `framelift tune` testa as duas opções.
+
+**Opcional, para o seletor visual de trecho** ([`framelift trim`](#escolhendo-o-trecho-a-melhorar-framelift-trim)):
+instale o [VLC media player](https://www.videolan.org/vlc/) (64 bits se o seu Python for
+64 bits) e a biblioteca Python dele:
+
+```bash
+pip install -e ".[picker]"         # instala o python-vlc
+```
+
+No Linux, o Tkinter também pode precisar de `sudo apt install python3-tk`. Todo o resto
+funciona sem eles.
+
 ## Primeiros passos
 
 ```bash
@@ -168,7 +194,7 @@ dependem do *seu* vídeo. Deixe o framelift medir:
 framelift tune -i entrada.mp4
 ```
 
-Leva um ou dois minutos (mais numa CPU lenta com vídeos grandes) e funciona em cinco etapas:
+Leva um ou dois minutos (mais numa CPU lenta com vídeos grandes) e funciona em seis etapas:
 
 1. **Analisa o vídeo.** Em frames espalhados pelo vídeo, mede a **suavidade** (o quanto a
    imagem está borrada), o **ruído** (que define o perfil de limpeza) e a resolução (que
@@ -178,9 +204,12 @@ Leva um ou dois minutos (mais numa CPU lenta com vídeos grandes) e funciona em 
    a mais rápida que cabe na memória: tamanhos de tile, FP16 na NVIDIA (conferido também sem
    ele, porque em algumas placas antigas o FP16 é mais lento) e, na CPU, **o número de
    threads** (notebooks que misturam núcleos rápidos e de eficiência muitas vezes rendem mais
-   com menos threads). Também verifica se o NVENC funciona.
+   com menos threads). Se o [OpenVINO](#instalação) estiver instalado, também cronometra
+   **o OpenVINO na CPU** e, se houver, **a GPU Intel** (com e sem FP16), e fica com o mais
+   rápido. Também verifica se o NVENC funciona.
 3. **Mede o que a IA faz com o seu vídeo.** É aqui que ele se adapta à entrada. Pequenos
-   recortes são ampliados com e sem IA, e três coisas são medidas:
+   recortes de três frames são ampliados com e sem IA (com um pouco da imagem em volta, para
+   a IA não tropeçar em bordas artificiais), e três coisas são medidas:
    - **nitidez:** quanto a IA realmente recupera em comparação com um resize comum;
    - **ruído:** se a IA limpa o ruído ou inventa granulação e textura;
    - **estrutura:** se ela restaura a imagem ou começa a redesenhar detalhes.
@@ -188,16 +217,25 @@ Leva um ou dois minutos (mais numa CPU lenta com vídeos grandes) e funciona em 
    Essas medidas definem a **força da IA**, separadamente para cada modelo. Uma fonte suave
    em que a IA recupera muito recebe uma força alta. Uma fonte que já é nítida, ou um modelo
    que inventa textura nesse vídeo, recebe uma força menor.
-4. **Monta dois presets**, cada um com a própria estimativa de tempo:
+4. **Monta dois presets**:
    - **`fast`**: o modelo leve feito para vídeo (`realesr-animevideov3`). Normalmente minutos.
    - **`best`**: um modelo mais pesado (`realesrgan-x4plus`, ou o modelo de anime com
      `--anime`) que recupera mais detalhe, com configurações mais cuidadosas: `--pre-pad 10`
      contra artefatos nas bordas, `--crf 18` para o encoder preservar mais detalhe e um preset
-     do x264 mais lento. Numa CPU, pode ser cerca de 30x mais lento.
+     do x264 mais lento. Numa CPU, pode ser cerca de 45x mais lento.
 
-   O `best` é recomendado quando a estimativa dele fica em até 10 minutos (clipes curtos ou
-   GPU); caso contrário, o recomendado é o `fast`.
-5. **Gera uma folha de comparação** (`entrada_tune.png`): o mesmo recorte em 100% com cada
+5. **Cronometra uma execução real curta.** Três frames passam pelo pipeline inteiro com as
+   configurações do preset (leitura, limpeza, IA, mistura e codificação, com o encoder
+   disputando a CPU como numa execução de verdade), então as estimativas de tempo incluem
+   tudo, menos a passada do áudio. Numa CPU com 4 threads ou mais, isso é feito duas vezes
+   (5 frames cada): com **um worker de IA** usando todas as threads e com **dois workers**
+   dividindo-as, cada um no seu frame. Dois workers só ficam se forem pelo menos 5% mais
+   rápidos. Na GPU, os dois presets são cronometrados assim. Na CPU,
+   onde um frame do `best` pode levar minutos, é cronometrado um tile do modelo pesado,
+   escalado para a divisão exata do frame em tiles. O `best` é recomendado quando a
+   estimativa dele fica em até 10 minutos (clipes curtos ou GPU); caso contrário, o
+   recomendado é o `fast`.
+6. **Gera uma folha de comparação** (`entrada_tune.png`): o mesmo recorte em 100% com cada
    preset (linhas) e diferentes forças de IA (colunas), com a escolha de cada preset marcada.
 
 Esta é a folha real do clipe musical colorido lá de cima. A linha de baixo é o preset
@@ -205,44 +243,49 @@ Esta é a folha real do clipe musical colorido lá de cima. A linha de baixo é 
 
 ![Folha de comparação gerada pelo framelift tune](docs/tune_sheet.jpg)
 
-E o relatório que ele mostrou (execução real numa máquina de teste com um único núcleo, por
-isso os tempos são longos):
+E um relatório de uma execução real em outro clipe 720x480, numa máquina de teste com um
+único núcleo e o OpenVINO instalado (por isso os tempos são longos e não houve teste de
+workers):
 
 ```
 Your machine
   CPU (no NVIDIA GPU in use, so expect it to be slow)
 
 Your video
-  input.mp4  720x480 @ 29.970 fps, 92 frames (0m03s)
-  Softness  soft (0.48)
+  input.mp4  720x480 @ 29.970 fps, 130 frames (0m04s)
+  Softness  slightly soft (0.35)
   Noise     very clean (0.4) → profile none
   Size      480p → 1080p → --scale 2.25
-  Tested on frame 37 (the sharpest steady one)
+  Tested on frame 123 (the sharpest steady one)
 
 What the AI does to it
-  animevideov3  sharpness +0.10 · noise -0.2 · structure 0.96  → AI strength 0.5
-                recovers some sharpness
-  x4plus        sharpness +0.20 · noise +0.2 · structure 0.96  → AI strength 0.6
+  animevideov3  sharpness +0.15 · noise ±0.0 · structure 0.98  → AI strength 0.6
+                recovers sharpness well
+  x4plus        sharpness +0.18 · noise ±0.0 · structure 0.98  → AI strength 0.6
                 recovers sharpness well
 
 Speed test (animevideov3, 1620x1080 output)
-  tile 256, FP32               5.85 s/frame
-  tile 128, FP32               4.34 s/frame  ← fastest
+  tile 256, FP32                       4.52 s/frame
+  tile 128, FP32                       5.34 s/frame
+  OpenVINO, tile 256, FP32             3.91 s/frame  ← fastest
+  Real run, 3 frames with encoding: 4.06 s/frame + 4 s to start
+  (real runs include reading, blending, encoding and loading the model)
 
 Presets
-  fast  animevideov3 · AI 0.5 · ~7 min  (light video model)  ← recommended
-  best  x4plus · AI 0.6 · ~3h56  (heavier model, more careful encoding)
-  Times are rough: they don't include loading the model or encoding.
+  fast  animevideov3 · AI 0.6 · ~9 min measured  (light video model)  ← recommended
+  best  x4plus · AI 0.6 · ~4h41 extrapolated  (heavier model, more careful encoding)
+  Times include loading the model and encoding (not the audio: a few seconds).
+  measured = a short real run of the preset; extrapolated = built from one.
 
 Comparison sheet: /home/you/input_tune.png
-  The same 100% crop of frame 37: columns are AI strengths
+  The same 100% crop of frame 123: columns are AI strengths
   (the presets' picks are marked), rows are the presets. Adjust to taste.
 
 Commands
   fast (recommended):
-    framelift -i input.mp4 -o input_enhanced.mp4 --scale 2.25 --ai-strength 0.5 --device cpu --tile 128 --x264-preset medium
+    framelift -i input.mp4 -o input_enhanced.mp4 --scale 2.25 --ai-strength 0.6 --device cpu --backend openvino --x264-preset medium
   best:
-    framelift -i input.mp4 -o input_enhanced_best.mp4 --model realesrgan-x4plus --scale 2.25 --ai-strength 0.6 --device cpu --tile 128 --pre-pad 10 --crf 18 --x264-preset slow
+    framelift -i input.mp4 -o input_enhanced_best.mp4 --model realesrgan-x4plus --scale 2.25 --ai-strength 0.6 --device cpu --backend openvino --pre-pad 10 --crf 18 --x264-preset slow
 ```
 
 Vale saber:
@@ -262,14 +305,16 @@ Vale saber:
   medição de ruído não as conta e não sugere perfil de limpeza; a etapa 3 mede como a IA lida
   com elas. Se elas incomodarem, rode o tune de novo com `--profile soft_camera` e compare
   as folhas.
-- **As estimativas de tempo são aproximadas.** Elas contam a IA e a pré-limpeza, mas não o
-  carregamento do modelo nem a codificação. Nos nossos testes, a execução real levou cerca de
-  15% a mais. Na CPU, o tempo do `best` é extrapolado de um teste menor.
+- **As estimativas de tempo vêm de uma execução real curta**, então incluem o carregamento
+  do modelo e a codificação. Nos nossos testes, a execução real de 40 frames levou 7% a mais
+  que o estimado (205 s contra 191 s, já contando a inicialização do próprio Python). Na CPU,
+  a estimativa do `best` é montada a partir de um tile cronometrado do modelo pesado, e não
+  de um frame inteiro; use-a como uma boa referência.
 - **A primeira execução baixa o modelo mais pesado** (67 MB). O `--no-best` pula essa etapa e
   ajusta só o preset `fast`.
 - **Em CPUs lentas com vídeos Full HD ou maiores, o próprio teste de velocidade pode levar
-  vários minutos.** O `--no-benchmark` pula essa etapa e ainda entrega as medições, os presets
-  (sem estimativa de tempo) e a folha.
+  vários minutos.** O `--no-benchmark` pula essa etapa (e a execução real curta) e ainda
+  entrega as medições, os presets (sem estimativa de tempo) e a folha.
 - **Os dois presets gravam em arquivos diferentes** (`_enhanced.mp4` e `_enhanced_best.mp4`),
   então dá para rodar os dois num clipe curto e comparar.
 
@@ -280,13 +325,76 @@ Vale saber:
 | `--samples N` | `6` | Frames espalhados pelo vídeo que são analisados em ruído, suavidade e movimento. |
 | `--sheet PNG` | `<entrada>_tune.png` | Onde salvar a folha de comparação (por padrão, na pasta atual). |
 | `--no-sheet` | desligado | Não gera a folha de comparação. |
-| `--no-benchmark` | desligado | Pula o teste de velocidade: bem mais rápido na CPU, mas sem ajuste de tile/FP16/threads e sem estimativas de tempo. |
+| `--no-benchmark` | desligado | Pula o teste de velocidade e a execução real curta: bem mais rápido na CPU, mas sem ajuste de tile/FP16/threads e sem estimativas de tempo. |
 | `--no-best` | desligado | Ajusta só o preset `fast`: pula o modelo mais pesado e o download dele. |
 | `--anime` | desligado | O vídeo é animação: o preset `best` usa o `realesrgan-x4plus-anime-6B`. |
-| `--model`, `--device`, `--gpu-id`, `--weights-dir`, `--torch-threads`, `--profile`, `--scale`, `--same-resolution`, `--ai-strength`, `--tile`, `--half`, `--encoder`, `--start-frame`, `--max-frames` | não definidas | Mesmo significado do comando principal. O que você passar é mantido e levado para os comandos sugeridos. `--start-frame` e `--max-frames` mudam as estimativas de tempo. |
+| `--model`, `--device`, `--gpu-id`, `--weights-dir`, `--torch-threads`, `--workers`, `--backend`, `--profile`, `--scale`, `--same-resolution`, `--ai-strength`, `--tile`, `--half`, `--encoder`, `--start-frame`, `--max-frames` | não definidas | Mesmo significado do comando principal. O que você passar é mantido e levado para os comandos sugeridos. `--start-frame` e `--max-frames` mudam as estimativas de tempo. |
 | `-v`, `-q` | | Mais detalhes / só o relatório final. |
 
 Os códigos de saída são os mesmos do comando principal; <kbd>Ctrl</kbd>+<kbd>C</kbd> cancela com código 130.
+
+## Escolhendo o trecho a melhorar (`framelift trim`)
+
+Muitas vezes só uma parte do vídeo importa: uma música do show, uma cena da fita. Escolha
+no olho:
+
+```bash
+framelift trim -i show.mp4
+```
+
+Abre uma janela de player (quem reproduz é o VLC, então fica fluido mesmo com arquivos
+grandes) com uma linha do tempo embaixo do vídeo:
+
+- **arraste as duas alças brancas** para marcar o início e o fim; o vídeo acompanha, então
+  você vê o frame exato em que está. Clique em qualquer outro ponto da linha do tempo para
+  mover a agulha;
+- ou use as teclas: <kbd>Espaço</kbd> play/pause, <kbd>I</kbd> / <kbd>O</kbd> marcam o início /
+  fim na agulha, <kbd>←</kbd> <kbd>→</kbd> um frame, <kbd>Shift</kbd>+<kbd>←</kbd>
+  <kbd>→</kbd> um segundo, <kbd>Home</kbd> / <kbd>End</kbd> vão para o início / fim,
+  <kbd>M</kbd> tira o som;
+- **Play selection** toca só o trecho escolhido e para no último frame dele;
+- <kbd>Enter</kbd> (ou **Use this range**) confirma, <kbd>Esc</kbd> cancela.
+
+O trecho escolhido é salvo como um **arquivo novo**, `show_trim_<primeiro>-<último frame>.mp4`
+ao lado do original, e o framelift mostra os comandos para ajustar e melhorar esse arquivo.
+O original nunca é alterado. A cópia cortada:
+
+- **começa e termina exatamente nos frames escolhidos**, mesmo entre keyframes;
+- **tem exatamente os mesmos pixels** do original: o vídeo é guardado sem perdas. O preço é
+  o tamanho, algo como 10–30x o original, então apague-a quando terminar;
+- **mantém o áudio sincronizado até a amostra**, também sem perdas (ALAC). Ele é convertido
+  para AAC quando o vídeo melhorado é salvo.
+
+A partir daí **o corte é a sua entrada**: `--start-frame` e `--max-frames` contam dentro
+dele, então parar no meio e [retomar](#parar-retomar-e-juntar-partes) funciona como sempre.
+
+Para escolher e melhorar de uma vez, acrescente `--pick-range` ao comando normal:
+
+```bash
+framelift -i show.mp4 -o musica3_hd.mp4 --pick-range
+```
+
+Se a execução parar antes do fim, a dica de retomada aponta para o corte (`-i
+show_trim_….mp4 --start-frame N`); rode esse comando sem `--pick-range`. Escolher de novo
+o mesmo trecho reaproveita o corte já feito, em vez de cortar duas vezes.
+
+Sem área de trabalho (servidor, SSH)? Informe os tempos, e nenhuma janela é aberta:
+
+```bash
+framelift trim -i show.mp4 --start 1:30 --end 2:45.5
+```
+
+| Flag | Padrão | Descrição |
+| --- | --- | --- |
+| `-i`, `--input VIDEO` | *obrigatório* | Vídeo a cortar. |
+| `-o`, `--output MP4` | `<entrada>_trim_<primeiro>-<último>.mp4` | Onde salvar o corte (por padrão, ao lado da entrada). |
+| `--start TEMPO` | o começo | Início, sem a janela: segundos (`90.5`), `M:SS` (`1:30`) ou `H:MM:SS` (`1:02:03`). |
+| `--end TEMPO` | o fim | Fim, nos mesmos formatos. Informe um dos dois, ou os dois, para não abrir a janela. |
+| `-v`, `-q` | | Mais detalhes / só avisos e erros. |
+
+Códigos de saída: `0` salvo, `1` erro ou janela fechada sem escolher, `130`
+<kbd>Ctrl</kbd>+<kbd>C</kbd>. O seletor precisa do VLC e do python-vlc (veja
+[Instalação](#instalação)); `--start`/`--end`, não.
 
 ## Receitas
 
@@ -303,6 +411,7 @@ Os códigos de saída são os mesmos do comando principal; <kbd>Ctrl</kbd>+<kbd>
 | GPU NVIDIA a toda velocidade | `framelift -i in.mp4 -o out.mp4 --device cuda --half --tile 768 --encoder nvenc` |
 | Notebook Intel (CPU) | `framelift -i in.mp4 -o out.mp4 --device cpu --tile 128 --torch-threads 8` |
 | Retomar depois do frame 1200 | `framelift -i in.mp4 -o parte2.mp4 --start-frame 1201` |
+| Só um trecho do vídeo | `framelift -i in.mp4 -o trecho.mp4 --pick-range` |
 
 ## Referência da linha de comando
 
@@ -337,18 +446,21 @@ framelift -i ENTRADA -o SAIDA [opções]
 | --- | --- | --- |
 | `--start-frame N` | `1` | Primeiro frame a processar, contando a partir de **1**. Serve para retomar uma execução interrompida: se o último frame feito foi o 1200, passe `1201`. |
 | `--max-frames N` | todos | Processa no máximo `N` frames a partir de `--start-frame`. Ideal para prévias e para dividir trabalhos longos em sessões. |
+| `--pick-range` | desligado | Antes de processar, abre o [seletor de trecho](#escolhendo-o-trecho-a-melhorar-framelift-trim) para escolher a parte a melhorar. Essa parte é salva como `<entrada>_trim_<primeiro>-<último>.mp4` e vira a entrada; `--start-frame` e `--max-frames` passam a contar dentro dela. Precisa do VLC. |
 
 ### Hardware e desempenho
 
 | Flag | Padrão | Descrição |
 | --- | --- | --- |
-| `--device {auto,cpu,cuda}` | `auto` | Onde a IA roda. `auto` usa a GPU NVIDIA se o PyTorch enxergar uma, senão a CPU. Use `cpu` com gráficos Intel/AMD e em Macs. `cuda` falha com mensagem clara se não houver GPU. |
+| `--device {auto,cpu,cuda,igpu}` | `auto` | Onde a IA roda. `auto` usa a GPU NVIDIA se o PyTorch enxergar uma, senão a CPU. `igpu` roda numa GPU Intel (Iris, UHD, Arc) pelo OpenVINO (`pip install openvino`); o `auto` nunca a escolhe sozinho, quem verifica se ela é mais rápida é o `framelift tune`. `cuda` e `igpu` falham com mensagem clara se aquela GPU não puder ser usada. |
 | `--gpu-id ID` | `0` | Qual GPU CUDA usar em máquinas com várias (o `nvidia-smi` lista os IDs). |
-| `--half` | desligado | Roda o modelo em FP16 na GPU: mais rápido e com cerca de metade da VRAM, sem perda visível. Ignorado (com aviso) na CPU. |
+| `--half` | desligado | Roda o modelo em FP16 na GPU (CUDA ou `igpu`): mais rápido e com cerca de metade da memória, sem perda visível. Ignorado (com aviso) na CPU. |
 | `--tile PX` | `256` | Divide cada frame em blocos quadrados desse tamanho antes da IA, o que limita o uso de memória. **Diminua** se faltar memória; **aumente** numa GPU grande para ganhar velocidade. `0` processa o frame inteiro de uma vez. Veja [Ajuste de desempenho](#ajuste-de-desempenho). |
 | `--tile-pad PX` | `10` | Sobreposição entre blocos vizinhos, que esconde emendas. Raramente precisa mudar. |
 | `--pre-pad PX` | `0` | Margem adicionada em volta do frame inteiro antes da inferência. Um valor pequeno (ex.: `10`) pode reduzir artefatos nas bordas da imagem. |
-| `--torch-threads N` | `0` | Quantas threads de CPU o PyTorch pode usar. `0` deixa o PyTorch decidir (geralmente todos os núcleos). Usar o número de núcleos *físicos* pode ajudar em alguns notebooks. |
+| `--torch-threads N` | `0` | Threads de CPU para a IA, **por worker** (o OpenVINO na CPU também usa). `0` deixa o PyTorch decidir (geralmente todos os núcleos), dividindo igualmente entre os workers. Usar o número de núcleos *físicos* pode ajudar em alguns notebooks. |
+| `--workers N` | `1` | Quantos frames a IA processa ao mesmo tempo, cada um com sua parte das threads de CPU. `2` pode ser mais rápido em CPUs com muitos núcleos (o `framelift tune` mede). Usa um pouco mais de memória; a saída é a mesma. |
+| `--backend {torch,openvino}` | `torch` | O que roda a IA na CPU. O `openvino` (runtime da Intel, `pip install openvino`) foi ~13% mais rápido nos nossos testes com o modelo padrão e ~20% com o `x4plus`, arredondando alguns valores de outro jeito (no máximo 1 nível em 255). O `framelift tune` compara os dois na sua máquina. |
 | `--prefetch N` | `2` | Quantos frames já limpos a thread leitora deixa prontos. Aumente (ex.: `4`–`8`) com perfis lentos como `heavy_noise` numa GPU rápida. Cada frame custa um pouco de RAM. |
 | `--weights-dir PASTA` | `weights` | Pasta onde ficam os arquivos dos modelos. Os que faltarem são baixados aqui automaticamente no primeiro uso (relativa à pasta atual). |
 
@@ -364,7 +476,7 @@ framelift -i ENTRADA -o SAIDA [opções]
 
 | Flag | Padrão | Descrição |
 | --- | --- | --- |
-| `--debug-timings` | desligado | Mostra de tempos em tempos quanto cada etapa leva (espera na fila, IA, mistura, escrita). Na CUDA, sincroniza a GPU para os números serem reais, o que custa um pouco de velocidade. |
+| `--debug-timings` | desligado | Mostra de tempos em tempos quanto cada etapa leva (espera pelo leitor, espera pela IA, mistura, escrita). Na CUDA, sincroniza a GPU para os números serem reais, o que custa um pouco de velocidade. |
 | `--timing-every N` | `20` | Com `--debug-timings`: relatório a cada `N` frames. |
 | `--gc-every N` | `0` | Com `--debug-timings`: roda o coletor de lixo do Python e libera a memória de GPU em cache a cada `N` frames. `0` = nunca. Ferramenta de diagnóstico para suspeita de vazamento de memória. |
 | `-v`, `--verbose` | desligado | Mostra mais detalhes: comandos do FFmpeg, caminhos de arquivos, valores das verificações e o traceback completo em erros inesperados. |
@@ -400,7 +512,7 @@ framelift -i ENTRADA -o SAIDA [opções]
 | Nome | Melhor para | Velocidade | Observações |
 | --- | --- | --- | --- |
 | `realesr-animevideov3` *(padrão)* | Vídeo em geral, animação | ⚡⚡⚡ | Rede pequena feita para vídeo, e de longe a mais rápida. Comece por ela. |
-| `realesrgan-x4plus` | Filmagens reais | 🐢 | Mais detalhe, mas lento: cerca de 27x mais lento que o padrão numa CPU nos nossos testes. Pode inventar texturas; combine com um `--ai-strength` menor. |
+| `realesrgan-x4plus` | Filmagens reais | 🐢 | Mais detalhe, mas lento: cerca de 45x mais lento que o padrão numa CPU nos nossos testes. Pode inventar texturas; combine com um `--ai-strength` menor. |
 | `realesrnet-x4plus` | Filmagens reais, visual mais suave | 🐢 | Mesmo tamanho do x4plus, inventa menos texturas. |
 | `realesrgan-x4plus-anime-6B` | Anime, desenhos, ilustrações | ⚡⚡ | Preserva cores chapadas e traços limpos. |
 
@@ -435,17 +547,36 @@ na sua máquina. Fora isso, um guia aproximado:
 | --- | --- |
 | NVIDIA com 8 GB+ de VRAM | `--device cuda --half --tile 768` (ou `--tile 0` se couber) `--encoder nvenc` |
 | NVIDIA com 4–6 GB de VRAM | `--device cuda --half --tile 384` |
-| CPU / Intel Iris / AMD / Apple | `--device cpu --tile 128` ou `256`, modelo padrão, e veja a dica de threads abaixo |
+| Intel Iris / UHD / Arc | instale o OpenVINO e rode o `framelift tune`: ele compara o `--device igpu` com a CPU |
+| CPU (Intel / AMD) | `--device cpu --tile 128` ou `256`, modelo padrão; teste `--backend openvino` e, com muitos núcleos, `--workers 2` (o `framelift tune` testa os dois) |
+| Apple | `--device cpu --tile 128` ou `256`, modelo padrão, e veja a dica de threads abaixo |
 
 - **Faltou memória?** Corte o `--tile` pela metade. É o principal controle de memória.
 - **Para onde vai o tempo?** Use `--debug-timings`. Muito tempo em `queue` indica que a
-  leitura (o perfil) é o gargalo; em `ai`, o modelo; em `write`, o encoder (tente
-  `--encoder nvenc` ou um `--x264-preset` mais rápido).
-- **O modelo pesa mais que qualquer outra opção:** o `realesr-animevideov3` foi cerca de 27x
+  leitura (o perfil) é o gargalo; em `ai` (o tempo esperando a IA), o modelo; em `write`, o
+  encoder (tente `--encoder nvenc` ou um `--x264-preset` mais rápido).
+- **O modelo pesa mais que qualquer outra opção:** o `realesr-animevideov3` foi cerca de 45x
   mais rápido que o `realesrgan-x4plus` numa CPU nos nossos testes.
+- **O modelo padrão ficou ~30% mais rápido na CPU na 1.4.** Ele agora roda no formato de
+  memória preferido pela biblioteca de cálculo da CPU (channels-last); nos nossos testes, um
+  frame 720x480 passou de 8,3 para 5,8 s. Os modelos mais pesados ficaram *mais lentos*
+  assim, então continuam como antes.
 - **O `--scale` quase não muda a velocidade.** Os modelos sempre ampliam 4x internamente e
   só redimensionam para a sua escala no fim, então gerar 1080p custa praticamente o mesmo
   tempo de IA que 720p.
+- **A IA e o resto se sobrepõem.** Desde a 1.5 a IA roda na própria thread: enquanto ela
+  trabalha no próximo frame, o anterior é redimensionado, misturado e codificado. Isso só
+  ajuda quando sobram núcleos; num único núcleo dá empate (os mesmos 55–56 s para 12 frames
+  nos nossos testes). A saída é idêntica bit a bit à de antes.
+- **Dois workers em CPUs com muitos núcleos.** O PyTorch espalha um frame por todos os
+  núcleos, mas fica menos eficiente conforme eles aumentam, principalmente em notebooks que
+  misturam núcleos rápidos e de eficiência. O `--workers 2` dá a cada um de dois frames
+  metade das threads. Se isso é mais rápido depende da CPU, então o `framelift tune` mede
+  com duas execuções reais curtas.
+- **OpenVINO.** O runtime da Intel costuma ser mais rápido que o PyTorch na CPU
+  (`--backend openvino`) e consegue usar GPUs Intel (`--device igpu`). A primeira execução
+  compila o modelo para cada tamanho de tile (alguns segundos na CPU, mais numa GPU); o
+  resultado fica em `weights/openvino_cache/`, então as próximas começam mais rápido.
 - **Mais threads de CPU nem sempre é mais rápido.** Em notebooks que misturam núcleos de
   desempenho e de eficiência, um `--torch-threads` menor (algo como 4–6) pode ganhar de usar
   todos. O `framelift tune` testa isso para você. E deixe o notebook na tomada e fora do
@@ -612,7 +743,24 @@ enhance_video("clip.mp4", "clip_hd.mp4", report.presets["fast"].options)
 que cada modelo faz, medido, com o vídeo. Passe `options=EnhanceOptions(...)` como ponto de
 partida e `keep={"profile", "scale"}` para fixar as configurações que você já decidiu.
 `try_best=False` pula o modelo mais pesado, `content="anime"` escolhe o modelo de anime para o
-preset `best`, e `benchmark=False` pula o teste de velocidade.
+preset `best`, e `benchmark=False` pula o teste de velocidade. `report.real_run` guarda a
+execução real curta (`report.real_runs` traz as duas quando 1 e 2 workers foram comparados),
+o `basis` de cada preset diz se o tempo foi `"measured"` (medido) ou `"extrapolated"`
+(extrapolado), e cada item de `report.runs` diz qual `device` e qual `backend` mediu.
+
+### Escolhendo o trecho pelo código
+
+```python
+from framelift import FrameRange, enhance_video, pick_range, trim_video
+
+frames = pick_range("show.mp4")  # abre a janela do player; None se cancelar
+# frames = FrameRange(2701, 4500)  # ou decida você (frames contam a partir de 1, ambos incluídos)
+if frames:
+    cut = trim_video("show.mp4", "musica3.mp4", frames)
+    enhance_video(cut.path, "musica3_hd.mp4")
+```
+
+O `trim_video` funciona sem o VLC; só o `pick_range` precisa dele.
 
 ### Peças avulsas
 
@@ -672,6 +820,18 @@ entrada com o FFmpeg. Se for *depois* da IA, suspeite de um arquivo de pesos cor
 **`--output-fps … is lower than the input's`**: reduzir o frame rate não é suportado.
 Omita o `--output-fps` ou converta a entrada antes com `ffmpeg -i in.mp4 -r 30 in30.mp4`.
 
+**O seletor de trecho não abre**: a mensagem diz o que falta: o VLC (instale pelo
+[videolan.org](https://www.videolan.org/vlc/), com os mesmos 32/64 bits do Python) e
+`pip install python-vlc`, o Tkinter (`sudo apt install python3-tk` no Debian/Ubuntu) ou uma
+área de trabalho. Sem área de trabalho, use `framelift trim -i … --start … --end …`. No
+macOS a janela não foi testada; se o vídeo ficar preto, corte por tempo.
+
+**`--device igpu`: o OpenVINO não enxerga uma GPU Intel**: instale o OpenVINO
+(`pip install openvino`) e atualize o driver gráfico da Intel; no Linux, a GPU também precisa
+do runtime de computação da Intel (`intel-opencl-icd`) e do seu usuário no grupo `render`.
+Confira com `python -c "import openvino as ov; print(ov.Core().available_devices)"`: a lista
+deve incluir `GPU`.
+
 **Está muito lento**: veja [Ajuste de desempenho](#ajuste-de-desempenho). Na CPU, isso é
 esperado; use o modelo padrão e faça prévias com `--max-frames`.
 
@@ -689,6 +849,9 @@ framelift/
 │   ├── tuning.py      # tune_video: velocidade, teste do efeito da IA, presets, folha
 │   ├── analysis.py    # medidas de ruído, suavidade, movimento e efeito da IA; folha
 │   ├── tune_cli.py    # o subcomando `framelift tune`
+│   ├── trim.py        # FrameRange / trim_video: cortes no frame exato, sem perdas
+│   ├── trim_cli.py    # o subcomando `framelift trim` e o --pick-range
+│   ├── picker.py      # pick_range: a janela do player com linha do tempo (Tk + VLC)
 │   ├── planning.py    # RunPlan / EnhanceResult: tamanhos, intervalos, frame rates
 │   ├── options.py     # EnhanceOptions: todas as configurações, validadas
 │   ├── video.py       # leitura de metadados + FrameReader em segundo plano
@@ -727,8 +890,11 @@ A CI roda a suíte rápida e o linter no Python 3.9–3.12 a cada push.
 Nada quebra: toda flag manteve nome e valor padrão, e `python main.py …` continua
 funcionando. O vídeo foi verificado frame a frame (MD5 de cada frame decodificado) contra
 o script original, com vários perfis, escalas, conversão de frame rate, retomada e
-configurações de tile. A única diferença na saída é bem-vinda: agora ela mantém o áudio
-(use `--no-audio` para ter o MP4 sem som de antes).
+configurações de tile. Duas coisas diferem na saída. Agora ela mantém o áudio (use
+`--no-audio` para ter o MP4 sem som de antes). E, desde a 1.4, na CPU, o modelo padrão roda
+cerca de 30% mais rápido num formato de memória diferente, o que arredonda alguns valores de
+outro jeito: no máximo 1 nível em 255, em cerca de 0,002% deles. É invisível, mas não é mais
+idêntico bit a bit. Execuções na GPU e os outros modelos não mudam.
 
 O que mudou, incluindo algumas correções de bugs, está no
 [CHANGELOG](CHANGELOG.md).

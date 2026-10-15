@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-__version__ = "1.3.0"
+__version__ = "1.5.0"
 
 from .analysis import AIEffect, estimate_noise, softness, suggest_ai_strength, suggest_size
 from .console import setup_console
@@ -33,7 +33,9 @@ from .errors import (
 from .filters import PROFILES, Profile, apply_profile
 from .models import MODELS, ModelSpec
 from .options import EnhanceOptions
+from .picker import pick_range
 from .planning import EnhanceResult, RunPlan, plan_run
+from .trim import FrameRange, TrimResult, trim_video
 from .video import VideoInfo, probe_video
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -66,6 +68,11 @@ __all__ = [
     "softness",
     "suggest_ai_strength",
     "suggest_size",
+    # choosing the part to enhance
+    "pick_range",
+    "trim_video",
+    "FrameRange",
+    "TrimResult",
     # catalogs
     "MODELS",
     "ModelSpec",

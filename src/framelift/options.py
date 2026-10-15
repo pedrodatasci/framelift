@@ -14,7 +14,9 @@ from .errors import InvalidOptionError
 from .filters import PROFILES
 from .models import MODELS
 
-DEVICES = ("auto", "cpu", "cuda")
+DEVICES = ("auto", "cpu", "cuda", "igpu")
+BACKENDS = ("torch", "openvino")
+MAX_WORKERS = 8
 ENCODERS = ("cpu", "nvenc")
 X264_PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")
 
@@ -58,16 +60,24 @@ class EnhanceOptions:
 
     # --- Hardware ----------------------------------------------------------
     device: str = "auto"
-    """``auto`` (CUDA if available), ``cpu`` or ``cuda``."""
+    """``auto`` (CUDA if available), ``cpu``, ``cuda`` or ``igpu`` (Intel GPU, via OpenVINO)."""
 
     gpu_id: int = 0
     """Which CUDA GPU to use when there is more than one."""
 
     half: bool = False
-    """Use FP16 on CUDA — faster and lighter on VRAM. Ignored on CPU."""
+    """Use FP16 on the GPU (CUDA or Intel) — faster and lighter on memory. Ignored on CPU."""
 
     torch_threads: int = 0
-    """PyTorch CPU threads. ``0`` lets PyTorch decide."""
+    """PyTorch CPU threads (per worker). ``0`` lets PyTorch decide, split between workers."""
+
+    backend: str = "torch"
+    """What runs the AI on the CPU: ``torch`` (PyTorch) or ``openvino`` (Intel's runtime,
+    needs ``pip install openvino``; often faster). ``--device igpu`` always uses OpenVINO."""
+
+    workers: int = 1
+    """Frames the AI works on at the same time, each with its share of the CPU threads.
+    Two can be faster on CPUs with many cores (``framelift tune`` measures it)."""
 
     tile: int = 256
     """Split frames into tiles of this size to save memory. ``0`` disables tiling."""
@@ -128,6 +138,7 @@ class EnhanceOptions:
         _require_choice("model", self.model, MODELS)
         _require_choice("profile", self.profile, PROFILES)
         _require_choice("device", self.device, DEVICES)
+        _require_choice("backend", self.backend, BACKENDS)
         _require_choice("encoder", self.encoder, ENCODERS)
         _require_choice("x264_preset", self.x264_preset, X264_PRESETS)
 
@@ -147,6 +158,8 @@ class EnhanceOptions:
             raise InvalidOptionError("tile, tile_pad and pre_pad can't be negative.")
         if self.gpu_id < 0:
             raise InvalidOptionError("gpu_id can't be negative.")
+        if not 1 <= self.workers <= MAX_WORKERS:
+            raise InvalidOptionError(f"workers must be between 1 and {MAX_WORKERS}.")
 
     @classmethod
     def field_names(cls) -> list[str]:

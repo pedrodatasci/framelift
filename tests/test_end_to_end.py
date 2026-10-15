@@ -148,3 +148,87 @@ def test_enhance_video_keeps_the_audio(tmp_path, options):
 def test_input_without_audio_reports_none(make_video, tmp_path, options):
     result = enhance_video(make_video(frames=4), tmp_path / "o.mp4", options, show_progress=False)
     assert result.audio == "none"
+
+
+def _frame_md5s(path):
+    import hashlib
+
+    import cv2
+
+    capture, hashes = cv2.VideoCapture(str(path)), []
+    while True:
+        ok, image = capture.read()
+        if not ok:
+            return hashes
+        hashes.append(hashlib.md5(image.tobytes()).hexdigest())
+
+
+def test_workers_change_speed_not_output(make_video, tmp_path):
+    """1 or 2 AI workers: the same frames, in the same order."""
+    clip = make_video(frames=6)
+    outputs = []
+    for workers in (1, 2):
+        output = tmp_path / f"w{workers}.mp4"
+        result = enhance_video(clip, output, device="cpu", tile=32, workers=workers, audio=False,
+                               show_progress=False)  # fmt: skip
+        assert result.frames_written == 6
+        outputs.append(_frame_md5s(output))
+    assert outputs[0] == outputs[1]
+
+
+def test_upscaler_matches_realesrgan_exactly(make_video):
+    """AIUpscaler re-implements RealESRGANer.enhance; the output must not change."""
+    import contextlib
+    import io
+
+    from framelift.device import resolve_device
+    from framelift.models import ensure_weights, get_model
+    from framelift.upscaler import AIUpscaler, _import_realesrgan, build_network
+    from framelift.video import read_frames
+
+    _, _, RealESRGANer = _import_realesrgan()  # noqa: N806
+
+    frame = read_frames(make_video(frames=2), [1])[0][1]
+    spec = get_model("realesr-animevideov3")
+    weights = ensure_weights(spec, "weights")
+    for tile, pre_pad, scale in [(32, 0, 1.5), (0, 10, 2.0), (40, 10, 4.0)]:
+        ours = AIUpscaler(spec, weights, resolve_device("cpu"), tile=tile, pre_pad=pre_pad)
+        theirs = RealESRGANer(scale=4, model_path=str(weights), model=build_network(spec),
+                              tile=tile, tile_pad=10, pre_pad=pre_pad, half=False,
+                              device="cpu")  # fmt: skip
+        with contextlib.redirect_stdout(io.StringIO()):
+            expected, _ = theirs.enhance(frame, outscale=scale)
+        assert (ours.upscale(frame, scale) == expected).all()
+
+
+def test_openvino_backend(make_video, monkeypatch):
+    """OpenVINO on the CPU, and the Intel GPU path pointed at the CPU (no GPU in CI)."""
+    pytest.importorskip("openvino")
+    import framelift.device as devices
+    from framelift.models import ensure_weights, get_model
+    from framelift.upscaler import AIUpscaler
+    from framelift.video import read_frames
+
+    monkeypatch.setattr(devices, "OPENVINO_DEVICE", "CPU")
+    frame = read_frames(make_video(frames=2), [1])[0][1]
+    spec = get_model("realesr-animevideov3")
+    weights = ensure_weights(spec, "weights")
+    reference = AIUpscaler(spec, weights, devices.resolve_device("cpu"), tile=32).upscale(frame, 2)
+
+    for device, backend in [("cpu", "openvino"), ("igpu", "torch")]:
+        upscaler = AIUpscaler(spec, weights, devices.resolve_device(device), tile=32,
+                              backend=backend)  # fmt: skip
+        assert upscaler.backend == "openvino"
+        difference = abs(upscaler.upscale(frame, 2).astype(int) - reference.astype(int))
+        assert difference.max() <= 2
+
+
+def test_tune_video_tries_two_workers_on_a_multicore_cpu(make_video, options, monkeypatch):
+    import framelift.tuning as tuning
+
+    monkeypatch.setattr(tuning.torch, "get_num_threads", lambda: 8)  # pretend: 8 threads
+    monkeypatch.setattr(tuning, "_openvino_tests", lambda *args: [])
+    report = tuning.tune_video(make_video(frames=12), options, keep={"tile"}, try_best=False)
+    assert [run.workers for run in report.real_runs] == [1, 2]
+    assert report.real_run in report.real_runs
+    assert report.presets["fast"].options.workers == report.real_run.workers

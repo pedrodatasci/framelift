@@ -35,6 +35,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
+# The visual range picker (framelift trim / --pick-range). Also needs VLC media player.
+picker = ["python-vlc>=3.0.12118"]
+# OpenVINO: --backend openvino on CPU and --device igpu (Intel Iris/UHD/Arc GPUs).
+intel = ["openvino>=2024.0"]
 
 [project.scripts]
 framelift = "framelift.cli:main"

@@ -91,3 +91,16 @@ def test_audio_is_on_by_default_and_can_be_turned_off():
     assert options_from_args(default).audio is True
     assert options_from_args(silent).audio is False
     assert options_to_args(EnhanceOptions(audio=False)) == ["--no-audio"]
+
+
+def test_pick_range_is_a_cli_only_flag():
+    args = build_parser().parse_args(["-i", "a", "-o", "b", "--pick-range"])
+    assert args.pick_range
+    assert options_from_args(args) == EnhanceOptions()  # not an enhancement option
+
+
+def test_trim_is_dispatched_as_a_subcommand(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["trim", "--help"])
+    assert exc.value.code == 0
+    assert "--start" in capsys.readouterr().out

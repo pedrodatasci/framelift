@@ -18,7 +18,7 @@ from .console import setup_console
 from .errors import FrameliftError
 from .filters import PROFILES
 from .models import MODELS
-from .options import DEFAULT_MODEL, DEVICES, ENCODERS, X264_PRESETS, EnhanceOptions
+from .options import BACKENDS, DEFAULT_MODEL, DEVICES, ENCODERS, X264_PRESETS, EnhanceOptions
 
 log = logging.getLogger("framelift.cli")
 
@@ -36,8 +36,14 @@ examples:
   # Resume a run that stopped after frame 1200
   framelift -i in.mp4 -o part2.mp4 --start-frame 1201
 
+  # Choose the part to enhance on a timeline first (needs VLC)
+  framelift -i concert.mp4 -o concert_hd.mp4 --pick-range
+
 Not sure which settings to use? Let framelift measure and suggest them:
   framelift tune -i clip.mp4
+
+Only want part of the video? Cut it first (or use --pick-range):
+  framelift trim -i clip.mp4
 
 Press Ctrl+C once to stop early and still get a playable MP4 of what's done.
 Full documentation: https://github.com/pedrodatasci/framelift#readme
@@ -125,14 +131,22 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Only process N frames from --start-frame. Perfect for quick previews.",
     )
+    frames.add_argument(
+        "--pick-range",
+        action="store_true",
+        help="Before enhancing, open a player (VLC) to choose the part to enhance on a "
+        "timeline. That part is saved as <input>_trim_<first>-<last>.mp4, which becomes "
+        "the input; --start-frame/--max-frames then count within it.",
+    )
 
     hardware = parser.add_argument_group("hardware & performance")
     hardware.add_argument(
         "--device",
         default=defaults.device,
         choices=DEVICES,
-        help="auto uses an NVIDIA GPU (CUDA) if there is one, otherwise the CPU. "
-        "Use cpu on Intel Iris / AMD / Apple machines. (default: %(default)s)",
+        help="auto uses an NVIDIA GPU (CUDA) if there is one, otherwise the CPU. igpu runs "
+        "the AI on an Intel GPU (Iris, UHD, Arc) through OpenVINO (pip install openvino); "
+        "framelift tune checks whether it's faster. (default: %(default)s)",
     )
     hardware.add_argument(
         "--gpu-id",
@@ -144,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     hardware.add_argument(
         "--half",
         action="store_true",
-        help="Use FP16 on the GPU: faster and uses less VRAM. Ignored on CPU.",
+        help="Use FP16 on the GPU (CUDA or igpu): faster and uses less memory. Ignored on CPU.",
     )
     hardware.add_argument(
         "--tile",
@@ -175,7 +189,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=defaults.torch_threads,
         metavar="N",
-        help="CPU threads for PyTorch. 0 lets PyTorch decide. (default: %(default)s)",
+        help="CPU threads for the AI, per worker. 0 lets PyTorch decide (split between the "
+        "workers). (default: %(default)s)",
+    )
+    hardware.add_argument(
+        "--workers",
+        type=int,
+        default=defaults.workers,
+        metavar="N",
+        help="Frames the AI works on at the same time, each with its share of the CPU "
+        "threads. 2 can be faster on CPUs with many cores; framelift tune measures it. "
+        "(default: %(default)s)",
+    )
+    hardware.add_argument(
+        "--backend",
+        default=defaults.backend,
+        choices=BACKENDS,
+        help="What runs the AI on the CPU: torch (PyTorch) or openvino (Intel's runtime, "
+        "often faster; pip install openvino). framelift tune compares them. "
+        "(default: %(default)s)",
     )
     hardware.add_argument(
         "--prefetch",
@@ -338,6 +370,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .tune_cli import main as tune_main
 
         return tune_main(argv[1:])
+    if argv[:1] == ["trim"]:
+        from .trim_cli import main as trim_main
+
+        return trim_main(argv[1:])
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -354,6 +390,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--input and --output are required (try --help for examples).")
 
     setup_console(args.verbose - args.quiet)
+
+    if args.pick_range:
+        from .trim_cli import pick_and_trim
+
+        try:
+            cut = pick_and_trim(args.input)
+        except FrameliftError as exc:
+            log.error("%s", exc)
+            return 1
+        if cut is None:
+            log.warning("No range chosen, so nothing was enhanced.")
+            return 1
+        log.info("Enhancing the cut: %s", cut.path)
+        args.input = str(cut.path)
 
     try:
         from .pipeline import enhance_video  # heavy (PyTorch): import only when needed
@@ -377,11 +427,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.error("Run again with -v to see the full traceback.")
         return 1
 
-    _report(result)
+    _report(result, args.input if args.pick_range else None)
     return 0
 
 
-def _report(result) -> None:
+def _report(result, cut_input: str | None = None) -> None:
     minutes, seconds = divmod(int(result.elapsed_seconds), 60)
     status = "Saved a partial video" if result.interrupted else "Done!"
 
@@ -401,7 +451,17 @@ def _report(result) -> None:
         log.info("  with the original audio%s", " (as AAC)" if result.audio == "converted" else "")
 
     if result.resume_from is not None:
-        log.info("To continue from here, run again with:  --start-frame %d", result.resume_from)
+        if cut_input is not None:
+            # The cut is the input now: resume on it (without --pick-range).
+            shown = f'"{cut_input}"' if " " in cut_input else cut_input
+            log.info(
+                "To continue from here, run again with:  -i %s --start-frame %d "
+                "(and a new -o, without --pick-range)",
+                shown,
+                result.resume_from,
+            )
+        else:
+            log.info("To continue from here, run again with:  --start-frame %d", result.resume_from)
 
 
 def _print_catalog(title: str, entries: dict, default: str) -> None:

@@ -15,8 +15,11 @@ The public entry points are :func:`enhance_video` for one-off calls and
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
+from collections import deque
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Callable, Union
 
@@ -24,6 +27,7 @@ from tqdm import tqdm
 
 from .audio import add_audio
 from .device import (
+    DEFAULT_CPU_THREADS,
     Device,
     configure_torch,
     current_cpu_threads,
@@ -90,18 +94,18 @@ class VideoEnhancer:
         if not input_path.exists():
             raise VideoReadError(f"Input video not found: {input_path}")
 
-        configure_torch(options.torch_threads)
         device = resolve_device(options.device, options.gpu_id)
+        configure_torch(_threads_per_worker(options, device))
         encoder = select_encoder(options.encoder, device.kind)
 
-        if options.half and not device.is_cuda:
-            log.info("FP16 (--half) only applies to CUDA GPUs, so it's ignored on CPU.")
+        if options.half and not device.is_gpu:
+            log.info("FP16 (--half) only applies to GPUs, so it's ignored on CPU.")
 
         video = probe_video(input_path)
         plan = plan_run(video, options)
         _log_plan(plan, options, output_path, device, encoder)
 
-        if not device.is_cuda:
+        if not device.is_gpu:
             log.warning(
                 "Running the AI on the CPU. It works (Intel Iris laptops included), "
                 "but expect it to be much slower than an NVIDIA GPU."
@@ -115,7 +119,8 @@ class VideoEnhancer:
     def _get_upscaler(self, device: Device) -> AIUpscaler:
         opts = self.options
         key = (opts.model, str(Path(opts.weights_dir).resolve()), device, opts.tile,
-               opts.tile_pad, opts.pre_pad, opts.half)  # fmt: skip
+               opts.tile_pad, opts.pre_pad, opts.half, opts.backend,
+               current_cpu_threads())  # fmt: skip
 
         if self._upscaler is None or self._upscaler_key != key:
             spec = get_model(opts.model)
@@ -130,6 +135,7 @@ class VideoEnhancer:
                 tile_pad=opts.tile_pad,
                 pre_pad=opts.pre_pad,
                 half=opts.half,
+                backend=opts.backend,
             )
             self._upscaler_key = key
 
@@ -181,33 +187,58 @@ class VideoEnhancer:
         processed = 0
         last_frame = plan.start_frame - 1
         finished = False
+        # Frames whose AI is running (or done) in the workers, oldest first.
+        in_flight: deque[tuple[SourceFrame, Future]] = deque()
+        workers = _AIWorkers(upscaler, opts.workers)
+        reader_wait = [0.0]  # time the last frame took to come out of the reader
+
+        def finish_oldest() -> None:
+            """Wait for the oldest frame's AI, then blend, encode and count it."""
+            nonlocal processed, last_frame
+            frame, result = in_flight.popleft()
+            laps.restart()
+            laps.durations["queue"] = reader_wait[0]
+            native = result.result()
+            laps.sync()
+            laps.lap("ai")
+
+            output = self._finish_frame(
+                frame, native, plan, upscaler, laps, is_first=processed == 0
+            )
+            copies = repeat_count(processed + 1, plan.video.fps, plan.output_fps)
+            writer.write(output, copies=copies)
+            laps.lap("write")
+
+            processed += 1
+            last_frame = frame.number
+            progress.update(1)
+            if opts.debug_timings:
+                self._diagnostics(processed, frame.number, reader, writer, laps, device)
 
         try:
             with reader, progress:
-                for frame in reader:
-                    laps.lap("queue")
-
-                    if stop_event.is_set() and processed > 0:
+                waiting_since = time.perf_counter()
+                for submitted, frame in enumerate(reader):
+                    reader_wait[0] = time.perf_counter() - waiting_since
+                    if stop_event.is_set() and submitted > 0:
                         break
 
-                    output = self._enhance_frame(
-                        frame, plan, upscaler, laps, is_first=processed == 0
-                    )
-                    copies = repeat_count(processed + 1, plan.video.fps, plan.output_fps)
-                    writer.write(output, copies=copies)
-                    laps.lap("write")
+                    if submitted == 0:
+                        _ensure_not_black(frame.image, _BLACK_BEFORE_AI)
+                    in_flight.append((frame, workers.submit(frame.image)))
 
-                    processed += 1
-                    last_frame = frame.number
-                    progress.update(1)
-
-                    if opts.debug_timings:
-                        self._diagnostics(processed, frame.number, reader, writer, laps, device)
+                    # Keep every worker busy with a frame while this thread finishes the
+                    # oldest one (resize, blend, encode): the two overlap.
+                    if len(in_flight) > opts.workers:
+                        finish_oldest()
 
                     if stop_event.is_set():
                         break
+                    waiting_since = time.perf_counter()
 
-                    laps.restart()
+                # Frames already in the AI are finished too, not thrown away.
+                while in_flight:
+                    finish_oldest()
 
             if processed == 0:
                 raise NothingToDoError("No frames were processed, so there's no video to write.")
@@ -221,6 +252,7 @@ class VideoEnhancer:
             finished = True
 
         finally:
+            workers.close(wait=finished)
             if not finished:
                 writer.abort()
                 if writer.started:
@@ -253,24 +285,19 @@ class VideoEnhancer:
             log.info("Kept the audio, converted to AAC (its codec doesn't fit in an MP4).")
         return outcome
 
-    def _enhance_frame(
+    def _finish_frame(
         self,
         frame: SourceFrame,
+        native: Frame,
         plan: RunPlan,
         upscaler: AIUpscaler,
         laps: _Laps,
         *,
         is_first: bool,
     ) -> Frame:
-        """AI-upscale one frame and blend it with a classic resize."""
-        if is_first:
-            _ensure_not_black(frame.image, _BLACK_BEFORE_AI)
-
-        laps.sync()
-        enhanced = upscaler.upscale(frame.image, plan.scale)
-        laps.sync()
-        laps.lap("ai")
-
+        """Bring the AI's output (at the model's own scale) to size and blend it with a
+        classic resize."""
+        enhanced = upscaler.finish(native, frame.image.shape, plan.scale)
         output = blend_with_classic_upscale(
             frame.image, enhanced, plan.width, plan.height, self.options.ai_strength
         )
@@ -348,6 +375,56 @@ _BLACK_AFTER_AI = (
 )
 
 
+class _AIWorkers:
+    """Background threads that run the AI, each on its own frame.
+
+    With one worker, the AI of the next frame runs while the main thread finishes the
+    previous one. With more, several frames go through the AI at once, each with its
+    share of the CPU threads. The threads are daemons: a hard quit doesn't wait for them.
+    """
+
+    def __init__(self, upscaler: AIUpscaler, count: int) -> None:
+        self._upscaler = upscaler
+        self._jobs: queue.Queue = queue.Queue()
+        self._threads = [
+            threading.Thread(target=self._work, name=f"framelift-ai-{n}", daemon=True)
+            for n in range(count)
+        ]
+        for thread in self._threads:
+            thread.start()
+
+    def submit(self, image: Frame) -> Future:
+        result: Future = Future()
+        self._jobs.put((result, image))
+        return result
+
+    def close(self, wait: bool = True) -> None:
+        """Stop the threads. ``wait``: let them exit cleanly first (they're idle by then),
+        so none is still inside PyTorch while Python shuts down."""
+        for _ in self._threads:
+            self._jobs.put(None)
+        if wait:
+            for thread in self._threads:
+                thread.join(timeout=10)
+
+    def _work(self) -> None:
+        while (job := self._jobs.get()) is not None:
+            result, image = job
+            if not result.set_running_or_notify_cancel():
+                continue
+            try:
+                result.set_result(self._upscaler.infer(image))
+            except BaseException as exc:  # handed to the main thread, which re-raises it
+                result.set_exception(exc)
+
+
+def _threads_per_worker(options: EnhanceOptions, device: Device) -> int:
+    """CPU threads for each AI worker: yours, or PyTorch's default split between them."""
+    if options.torch_threads or options.workers == 1 or device.is_cuda:
+        return options.torch_threads
+    return max(1, DEFAULT_CPU_THREADS // options.workers)
+
+
 class _Laps:
     """A tiny stopwatch that records how long each named stage took."""
 
@@ -385,7 +462,7 @@ def _log_plan(
 ) -> None:
     video = plan.video
     size_note = "same size" if options.same_resolution else f"{plan.scale:g}x"
-    fp16 = "on" if options.half and device.is_cuda else "off"
+    fp16 = "on" if options.half and device.is_gpu else "off"
     encoder_label = ENCODER_LABELS[encoder]
     if encoder == "cpu":
         encoder_label += f", {options.x264_preset}"
@@ -401,7 +478,7 @@ def _log_plan(
         ("Look", f"model {options.model} · profile {options.profile} · "
                  f"AI strength {options.clamped_ai_strength:.2f}"),
         ("Device", f"{device.name} · tile {options.tile} · FP16 {fp16} · "
-                   f"{threads} CPU thread{'' if threads == 1 else 's'}"),
+                   f"{_workers_label(options, device, threads)}"),
         ("Encoder", f"{encoder_label} · CRF {options.crf} · prefetch {options.prefetch}"),
     ]  # fmt: skip
     if options.debug_timings:
@@ -410,3 +487,11 @@ def _log_plan(
     width = max(len(label) for label, _ in rows)
     lines = "\n".join(f"  {label:<{width}}  {value}" for label, value in rows)
     log.info("\n%s\n", lines)
+
+
+def _workers_label(options: EnhanceOptions, device: Device, threads: int) -> str:
+    cpu = f"{threads} CPU thread{'' if threads == 1 else 's'}"
+    backend = " · OpenVINO" if options.backend == "openvino" and device.kind == "cpu" else ""
+    if options.workers == 1:
+        return cpu + backend
+    return f"{options.workers} workers × {cpu}{backend}"

@@ -1,8 +1,9 @@
-"""Choosing where the AI runs (CUDA GPU or CPU) and tuning PyTorch for it."""
+"""Choosing where the AI runs (NVIDIA GPU, Intel GPU or CPU) and tuning PyTorch for it."""
 
 from __future__ import annotations
 
 import contextlib
+import functools
 import gc
 from dataclasses import dataclass
 
@@ -10,13 +11,24 @@ import torch
 
 from .errors import InvalidOptionError
 
+OPENVINO_DEVICE = "GPU"
+"""The OpenVINO device behind ``--device igpu``: Intel's integrated (Iris, UHD) or Arc GPU."""
+
+DEFAULT_CPU_THREADS = torch.get_num_threads()
+"""PyTorch's own choice of CPU threads, before anything changes it."""
+
+INSTALL_OPENVINO = (
+    'pip install openvino   (or: pip install -e ".[intel]"), and keep the Intel graphics '
+    "driver up to date"
+)
+
 
 @dataclass(frozen=True)
 class Device:
     """The compute device a run will use."""
 
     kind: str
-    """``"cuda"`` or ``"cpu"``."""
+    """``"cuda"``, ``"igpu"`` (an Intel GPU, through OpenVINO) or ``"cpu"``."""
 
     name: str
     """Human-friendly name, e.g. ``"NVIDIA GeForce RTX 3060"`` or ``"CPU"``."""
@@ -28,14 +40,32 @@ class Device:
         return self.kind == "cuda"
 
     @property
+    def is_gpu(self) -> bool:
+        return self.kind in ("cuda", "igpu")
+
+    @property
     def torch_device(self) -> torch.device:
+        """Where the tensors live (OpenVINO takes its input from the CPU)."""
         return torch.device(f"cuda:{self.gpu_id}") if self.is_cuda else torch.device("cpu")
 
 
 def resolve_device(requested: str, gpu_id: int = 0) -> Device:
-    """Turn ``auto`` / ``cpu`` / ``cuda`` into a concrete :class:`Device`."""
-    if requested not in ("auto", "cpu", "cuda"):
-        raise InvalidOptionError("device must be auto, cpu or cuda.")
+    """Turn ``auto`` / ``cpu`` / ``cuda`` / ``igpu`` into a concrete :class:`Device`.
+
+    ``auto`` never picks the Intel GPU on its own: ``framelift tune`` measures whether
+    it's actually faster than the CPU on your machine and suggests ``--device igpu``.
+    """
+    if requested not in ("auto", "cpu", "cuda", "igpu"):
+        raise InvalidOptionError("device must be auto, cpu, cuda or igpu.")
+
+    if requested == "igpu":
+        name = intel_gpu_name()
+        if name is None:
+            raise InvalidOptionError(
+                "You asked for --device igpu, but OpenVINO can't see an Intel GPU here. "
+                f"Install it with: {INSTALL_OPENVINO}. Or use --device cpu."
+            )
+        return Device(kind="igpu", name=name)
 
     cuda_available = torch.cuda.is_available()
 
@@ -52,10 +82,29 @@ def resolve_device(requested: str, gpu_id: int = 0) -> Device:
     return Device(kind="cuda", name=torch.cuda.get_device_name(gpu_id), gpu_id=gpu_id)
 
 
+def intel_gpu_name() -> str | None:
+    """The Intel GPU OpenVINO can use, or ``None`` (no OpenVINO, no GPU, no driver)."""
+    return _openvino_device_name(OPENVINO_DEVICE)
+
+
+@functools.cache
+def _openvino_device_name(device: str) -> str | None:
+    try:
+        import openvino as ov
+
+        core = ov.Core()
+        if device not in core.available_devices:
+            return None
+        return str(core.get_property(device, "FULL_DEVICE_NAME"))
+    except Exception:  # not installed, or a broken driver: either way, not usable
+        return None
+
+
 def configure_torch(cpu_threads: int = 0) -> None:
     """Apply process-wide PyTorch performance settings.
 
-    * ``cpu_threads > 0`` pins PyTorch's CPU thread pool size.
+    * ``cpu_threads > 0`` pins PyTorch's CPU thread pool size; ``0`` goes back to
+      PyTorch's own choice. With several AI workers this is the count *per worker*.
     * On CUDA, enables cuDNN autotuning and TF32 math (much faster on RTX
       30xx and newer, with no visible quality difference for this task).
     """
@@ -64,6 +113,8 @@ def configure_torch(cpu_threads: int = 0) -> None:
         # Can only be set once per process; harmless if it was already set.
         with contextlib.suppress(RuntimeError):
             torch.set_num_interop_threads(max(1, min(cpu_threads, 4)))
+    else:
+        torch.set_num_threads(DEFAULT_CPU_THREADS)
 
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True

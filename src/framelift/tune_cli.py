@@ -12,7 +12,7 @@ from .console import setup_console
 from .errors import FrameliftError
 from .filters import PROFILES
 from .models import MODELS
-from .options import DEVICES, ENCODERS, EnhanceOptions
+from .options import BACKENDS, DEVICES, ENCODERS, EnhanceOptions
 
 log = logging.getLogger("framelift.cli")
 
@@ -36,7 +36,8 @@ The commands printed at the end are ready to copy and run.
 
 # Settings you can pin. Anything given on the command line is left untouched.
 _PINNABLE = (
-    "model", "device", "gpu_id", "weights_dir", "torch_threads", "profile", "scale",
+    "model", "device", "gpu_id", "weights_dir", "torch_threads", "workers", "backend", "profile",
+    "scale",
     "same_resolution", "ai_strength", "tile", "half", "encoder", "start_frame", "max_frames",
 )  # fmt: skip
 
@@ -48,7 +49,8 @@ def build_tune_parser() -> argparse.ArgumentParser:
             "Find good settings for a video on this machine. Speed settings (device, "
             "FP16, tile, CPU threads, encoder) are measured on real frames. The AI "
             "strength comes from measuring what the AI actually does to this footage. "
-            "Ends with two ready-to-run presets, fast and best, with time estimates."
+            "Ends with two ready-to-run presets, fast and best, with time estimates "
+            "from a short real run."
         ),
         epilog=EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -74,8 +76,8 @@ def build_tune_parser() -> argparse.ArgumentParser:
     analysis.add_argument("--no-sheet", action="store_true", help="Don't make a comparison sheet.")
     analysis.add_argument(
         "--no-benchmark", action="store_true",
-        help="Skip the speed test. Much faster on CPU, but no tile/FP16/thread tuning and "
-             "no time estimates.",
+        help="Skip the speed test and the short real run. Much faster on CPU, but no "
+             "tile/FP16/thread tuning and no time estimates.",
     )  # fmt: skip
     analysis.add_argument(
         "--no-best", action="store_true",
@@ -97,6 +99,8 @@ def build_tune_parser() -> argparse.ArgumentParser:
     pinned.add_argument("--gpu-id", type=int, metavar="ID")
     pinned.add_argument("--weights-dir", metavar="DIR")
     pinned.add_argument("--torch-threads", type=int, metavar="N")
+    pinned.add_argument("--workers", type=int, metavar="N")
+    pinned.add_argument("--backend", choices=BACKENDS)
     pinned.add_argument("--profile", choices=list(PROFILES))
     pinned.add_argument("--scale", type=float, metavar="FACTOR")
     pinned.add_argument("--same-resolution", action="store_true", default=None)
@@ -173,6 +177,8 @@ def render_report(report, input_path, output_path, pinned=()) -> str:
         memory = f" ({report.gpu_memory_gb:.0f} GB)" if report.gpu_memory_gb else ""
         encoder = "NVENC available" if report.nvenc else "NVENC not available"
         machine = f"{report.device.name}{memory} · {encoder}"
+    elif report.device.kind == "igpu":
+        machine = f"{report.device.name} (Intel GPU, through OpenVINO: faster than the CPU here)"
     else:
         machine = "CPU (no NVIDIA GPU in use, so expect it to be slow)"
         threads = options.torch_threads or report.default_threads
@@ -223,12 +229,24 @@ def render_report(report, input_path, output_path, pinned=()) -> str:
         lines.append("  skipped (--no-benchmark)")
     best_run = report.best_run
     for run in report.runs:
-        config = f"tile {run.tile or 'off'}, {'FP16' if run.half else 'FP32'}"
-        if run.threads:
-            config += f", {run.threads} threads"
+        config = run_label(getattr(run, "device", "cpu"), getattr(run, "backend", "torch"),
+                           run.tile, run.half, run.threads)  # fmt: skip
         result = f"{run.seconds_per_frame:.2f} s/frame" if run.ok else run.error
         marker = "  ← fastest" if run is best_run else ""
-        lines.append(f"  {config:<28} {result}{marker}")
+        lines.append(f"  {config:<36} {result}{marker}")
+    real_runs = list(getattr(report, "real_runs", ())) or [r for r in [report.real_run] if r]
+    for real in real_runs:
+        if len(real_runs) > 1:
+            label = f"Real run, {workers_label(real.workers, real.threads)}:"
+            marker = "  ← faster" if real is report.real_run else ""
+        else:
+            label, marker = f"Real run, {real.frames} frames with encoding:", ""
+        lines.append(
+            f"  {label} {real.seconds_per_frame:.2f} s/frame"
+            f" + {_human_duration(real.overhead_seconds)} to start{marker}"
+        )
+    if real_runs:
+        lines.append("  (real runs include reading, blending, encoding and loading the model)")
     lines.append("")
 
     # Presets
@@ -236,11 +254,15 @@ def render_report(report, input_path, output_path, pinned=()) -> str:
     for name, preset in report.presets.items():
         details = [_short(preset.options.model), f"AI {preset.options.ai_strength:g}"]
         if preset.estimated_seconds is not None:
-            details.append(f"~{_human_duration(preset.estimated_seconds)}")
+            basis = f" {preset.basis}" if preset.basis else ""
+            details.append(f"~{_human_duration(preset.estimated_seconds)}{basis}")
         marker = "  ← recommended" if name == report.recommended_preset else ""
         lines.append(f"  {name:<5} {' · '.join(details)}  ({preset.description}){marker}")
-    if report.estimated_seconds is not None:
-        lines.append("  Times are rough: they don't include loading the model or encoding.")
+    if any(preset.estimated_seconds is not None for preset in report.presets.values()):
+        lines += [
+            "  Times include loading the model and encoding (not the audio: a few seconds).",
+            "  measured = a short real run of the preset; extrapolated = built from one.",
+        ]
     lines.append("")
 
     # Sheet
@@ -286,3 +308,16 @@ def _human_duration(seconds: float) -> str:
         return f"{minutes} min"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h{minutes:02d}"
+
+
+def run_label(device: str, backend: str, tile: int, half: bool, threads: int | None) -> str:
+    """e.g. ``Intel GPU, tile 512, FP16`` or ``OpenVINO, tile 256, 4 threads``."""
+    where = {"igpu": "Intel GPU, ", "cuda": ""}.get(device, "OpenVINO, " * (backend == "openvino"))
+    label = f"{where}tile {tile or 'off'}, {'FP16' if half else 'FP32'}"
+    return label + (f", {threads} threads" if threads else "")
+
+
+def workers_label(workers: int, threads: int | None) -> str:
+    """e.g. ``1 worker × 8 threads`` (or ``1 worker`` on a GPU)."""
+    label = f"{workers} worker{'s' if workers > 1 else ''}"
+    return label + (f" × {threads} thread{'s' if threads > 1 else ''}" if threads else "")

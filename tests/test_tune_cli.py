@@ -10,7 +10,7 @@ from framelift.tune_cli import _human_duration, _signed, build_tune_parser, rend
 VIDEO = VideoInfo(Path("clip.mp4"), fps=30.0, frame_count=900, width=640, height=360)
 
 
-def _preset(name, model, strength, seconds, **extra):
+def _preset(name, model, strength, seconds, basis="", **extra):
     options = EnhanceOptions(
         model=model, scale=3, ai_strength=strength, device="cpu", tile=128, **extra
     )
@@ -20,12 +20,13 @@ def _preset(name, model, strength, seconds, **extra):
         seconds_per_frame=None if seconds is None else seconds / 900,
         estimated_seconds=seconds,
         description="light video model" if name == "fast" else "heavier model",
+        basis=basis if seconds is not None else "",
     )
 
 
 def _report(**changes):
-    fast = _preset("fast", "realesr-animevideov3", 0.55, 450.0, torch_threads=4)
-    best = _preset("best", "realesrgan-x4plus", 0.5, 12150.0, crf=18)
+    fast = _preset("fast", "realesr-animevideov3", 0.55, 450.0, "measured", torch_threads=4)
+    best = _preset("best", "realesrgan-x4plus", 0.5, 12150.0, "extrapolated", crf=18)
     run = SimpleNamespace(tile=128, half=False, threads=None, seconds_per_frame=0.6, ok=True,
                           error=None)  # fmt: skip
     threads = SimpleNamespace(tile=128, half=False, threads=4, seconds_per_frame=0.5, ok=True,
@@ -35,7 +36,7 @@ def _report(**changes):
     fields = dict(
         video=VIDEO,
         plan=plan_run(VIDEO, fast.options),
-        device=SimpleNamespace(is_cuda=False, name="CPU"),
+        device=SimpleNamespace(is_cuda=False, kind="cpu", name="CPU"),
         gpu_memory_gb=None,
         nvenc=False,
         default_threads=10,
@@ -65,6 +66,7 @@ def _report(**changes):
         estimated_seconds=450.0,
         sample_frame=450,
         sheet_path=Path("clip_tune.png"),
+        real_run=SimpleNamespace(frames=3, seconds_per_frame=0.48, overhead_seconds=6.2),
     )
     fields.update(changes)
     return SimpleNamespace(**fields)
@@ -84,14 +86,52 @@ def test_report_explains_the_measurements():
 
 def test_report_lists_both_presets_with_commands():
     text = render_report(_report(), "clip.mp4", "clip_hd.mp4")
-    assert "fast  animevideov3 · AI 0.55 · ~8 min" in text
+    assert "fast  animevideov3 · AI 0.55 · ~8 min measured" in text
     assert "← recommended" in text
-    assert "best  x4plus · AI 0.5 · ~3h22" in text
+    assert "best  x4plus · AI 0.5 · ~3h22 extrapolated" in text
+    assert "Times include loading the model and encoding" in text
     assert "fast (recommended):" in text
     assert "--model realesrgan-x4plus" in text.split("best:")[1]
     assert "-o clip_hd_best.mp4" in text.split("best:")[1]
     assert "-o clip_hd.mp4" in text.split("fast (recommended):")[1].split("best:")[0]
     assert "clip_tune.png" in text
+
+
+def test_report_shows_the_real_run():
+    text = render_report(_report(), "clip.mp4", "clip_hd.mp4")
+    assert "Real run, 3 frames with encoding: 0.48 s/frame + 6 s to start" in text
+
+
+def test_report_shows_openvino_and_the_intel_gpu():
+    openvino = SimpleNamespace(tile=128, half=False, threads=4, seconds_per_frame=0.42, ok=True,
+                               error=None, device="cpu", backend="openvino")  # fmt: skip
+    igpu = SimpleNamespace(tile=512, half=True, threads=None, seconds_per_frame=0.2, ok=True,
+                           error=None, device="igpu", backend="openvino")  # fmt: skip
+    report = _report(
+        runs=[openvino, igpu],
+        best_run=igpu,
+        device=SimpleNamespace(is_cuda=False, kind="igpu", name="Intel(R) Iris(R) Xe Graphics"),
+    )
+    text = render_report(report, "clip.mp4", "clip_hd.mp4")
+    assert "Intel(R) Iris(R) Xe Graphics (Intel GPU, through OpenVINO" in text
+    assert "OpenVINO, tile 128, FP32, 4 threads" in text
+    assert "Intel GPU, tile 512, FP16" in text and "0.20 s/frame  ← fastest" in text
+
+
+def test_report_compares_workers():
+    one = SimpleNamespace(frames=5, seconds_per_frame=1.2, overhead_seconds=3, workers=1, threads=8)
+    two = SimpleNamespace(frames=5, seconds_per_frame=0.9, overhead_seconds=3, workers=2, threads=4)
+    text = render_report(_report(real_run=two, real_runs=(one, two)), "clip.mp4", "out.mp4")
+    assert "Real run, 1 worker × 8 threads: 1.20 s/frame + 3 s to start" in text
+    assert "Real run, 2 workers × 4 threads: 0.90 s/frame + 3 s to start  ← faster" in text
+
+
+def test_run_label():
+    from framelift.tune_cli import run_label, workers_label
+
+    assert run_label("cpu", "torch", 0, False, None) == "tile off, FP32"
+    assert run_label("cuda", "torch", 768, True, None) == "tile 768, FP16"
+    assert workers_label(1, None) == "1 worker" and workers_label(2, 1) == "2 workers × 1 thread"
 
 
 def test_pinned_settings_are_labelled():
@@ -102,12 +142,14 @@ def test_pinned_settings_are_labelled():
 def test_report_without_benchmark():
     fast = _preset("fast", "realesr-animevideov3", 0.55, None)
     text = render_report(
-        _report(runs=[], best_run=None, estimated_seconds=None, presets={"fast": fast}),
+        _report(
+            runs=[], best_run=None, estimated_seconds=None, presets={"fast": fast}, real_run=None
+        ),
         "clip.mp4",
         "out.mp4",
     )
     assert "skipped (--no-benchmark)" in text
-    assert "Times are rough" not in text
+    assert "Times include" not in text and "Real run" not in text
     assert "best" not in text.split("Presets")[1].split("Commands")[0]
 
 
