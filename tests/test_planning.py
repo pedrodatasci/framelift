@@ -50,3 +50,47 @@ def test_result_resume_hint():
     assert not _result(100).is_complete
     assert _result(240).resume_from is None
     assert _result(240).is_complete
+
+
+def test_interpolate_alone_doubles_the_frame_rate():
+    plan = plan_run(VIDEO, EnhanceOptions(interpolate=True))
+    assert plan.output_fps == 48.0
+    assert plan.expected_output_frames == 480
+
+
+def test_interpolate_keeps_a_chosen_frame_rate():
+    assert plan_run(VIDEO, EnhanceOptions(interpolate=True, output_fps=60)).output_fps == 60
+
+
+def test_interpolate_needs_a_higher_frame_rate():
+    with pytest.raises(InvalidOptionError, match="--interpolate needs"):
+        plan_run(VIDEO, EnhanceOptions(interpolate=True, output_fps=24))
+
+
+def test_simple_multiple_finds_the_exact_rate_close_by():
+    from framelift.planning import simple_multiple
+
+    assert simple_multiple(29.99, 60) == pytest.approx(59.98)
+    assert simple_multiple(23.976, 60) == pytest.approx(59.94)  # 2.5x
+    assert simple_multiple(30, 60) == pytest.approx(60)
+    assert simple_multiple(25, 60) is None  # 2.4x: nothing simple close by
+    assert simple_multiple(30, 30) is None
+
+
+def test_advice_when_almost_a_multiple_means_much_more_work():
+    from framelift.planning import interpolation_advice
+
+    advice = interpolation_advice(29.99, 60, 1635)
+    assert "2,835" in advice and "1,634" in advice and "59.980" in advice
+    assert "leave --output-fps out" in advice
+    assert interpolation_advice(29.99, 59.98, 1635) is None
+    assert interpolation_advice(30, 60, 1635) is None
+    assert interpolation_advice(29.99, 60, 20) is None  # too short to matter
+
+
+def test_a_rounded_multiple_is_made_exact_for_interpolation():
+    video = VideoInfo(Path("in.mp4"), fps=30000 / 1001, frame_count=240, width=640, height=360)
+    typed = EnhanceOptions(interpolate=True, output_fps=59.94)
+    assert plan_run(video, typed).output_fps == 60000 / 1001
+    # Without --interpolate the rate is used as given (frame repeating doesn't drift).
+    assert plan_run(video, EnhanceOptions(output_fps=59.94)).output_fps == 59.94

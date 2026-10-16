@@ -75,7 +75,10 @@ Enhanced on a laptop CPU.
   work on two frames at once. `framelift tune` measures which is fastest on *your* machine.
 - **Fast pipeline.** Frames are decoded on a background thread while the AI works, and
   streamed straight into FFmpeg: no temporary image files on disk.
-- **Frame-rate conversion.** Turn 24/30 fps into 60 fps without changing the duration.
+- **Smoother motion (RIFE).** Turn 24/30 fps into 60 fps with real in-between frames
+  drawn by [RIFE](https://github.com/hzwer/Practical-RIFE) (`--interpolate`), or just by
+  repeating frames. Either way the duration doesn't change, and it works along with the AI
+  or on its own (`--no-ai`).
 - **A real Python library**, not just a script: `enhance_video(...)`, typed options,
   structured results and specific exceptions.
 - **Models download themselves** on first use.
@@ -121,9 +124,24 @@ Enhanced on a laptop CPU.
 4. **Encode.** Raw frames are piped into FFmpeg (libx264 or NVENC). The file is written
    under a temporary name and only renamed once FFmpeg finishes cleanly.
 
+To raise the frame rate (`--output-fps`), frames are repeated in an even pattern. With
+`--interpolate`, RIFE draws the extra frames instead, between steps 3 and 4: it estimates
+how everything moves from one finished frame to the next and renders the moments in
+between. The AI still runs once per original frame. Across a scene cut there's no motion
+to follow, so those frames are repeated instead of blended.
+
+A frame identical to the one before it (a still, a duplicated frame) doesn't go through
+the AI again: its result would be the same, pixel for pixel, so the previous one is
+reused, and RIFE has nothing to draw between the two.
+
 Before committing to hours of work, framelift checks that the first frame isn't
 black — both before and after the AI — which catches broken decodes, corrupt weights
 and driver problems early.
+
+With `--no-ai` (or `--ai-strength 0`), step 2 is skipped and no model is loaded: each
+frame only gets the Lanczos resize. The same pipeline then resizes, pre-cleans or changes
+the frame rate at about the speed of decoding and encoding. The black-frame check is
+skipped too, since it's there to catch problems with the AI.
 
 ## Installation
 
@@ -402,6 +420,9 @@ Exit codes: `0` saved, `1` error or the window was closed without choosing, `130
 | Maximum detail (slow) | `framelift -i in.mp4 -o out.mp4 --model realesrgan-x4plus --ai-strength 0.6` |
 | Restore without resizing | `framelift -i in.mp4 -o out.mp4 --same-resolution` |
 | Convert to 60 fps | `framelift -i in.mp4 -o out.mp4 --output-fps 60` |
+| Only change the frame rate (no AI, fast) | `framelift -i in.mp4 -o out.mp4 --no-ai --same-resolution --output-fps 60` |
+| Smoother motion: 60 fps with RIFE | `framelift -i in.mp4 -o out.mp4 --output-fps 60 --interpolate` |
+| Only smoother motion (no AI) | `framelift -i in.mp4 -o out.mp4 --no-ai --same-resolution --interpolate` |
 | NVIDIA GPU, full speed | `framelift -i in.mp4 -o out.mp4 --device cuda --half --tile 768 --encoder nvenc` |
 | Intel laptop (CPU) | `framelift -i in.mp4 -o out.mp4 --device cpu --tile 128 --torch-threads 8` |
 | Resume after frame 1200 | `framelift -i in.mp4 -o part2.mp4 --start-frame 1201` |
@@ -430,9 +451,11 @@ Run `framelift --help` for the same information in your terminal.
 | `--model NAME` | `realesr-animevideov3` | Real-ESRGAN model. See [Models](#models) or `framelift --list-models`. |
 | `--scale FACTOR` | `1.5` | Output size relative to the input: `2` doubles width and height, `1.25` adds 25%. Values below 1 shrink the video (still cleaned by the AI). Ignored with `--same-resolution`. |
 | `--same-resolution` | off | Keep the exact input resolution. Useful to restore quality without making the file bigger. |
-| `--ai-strength N` | `0.45` | Share of the AI result in the final image, from `0` to `1`. `1.0` = pure AI (sharpest, can look artificial); `0.45` = balanced; `0.30` = natural; `0` = plain Lanczos resize. Values outside 0–1 are clamped. |
+| `--ai-strength N` | `0.45` | Share of the AI result in the final image, from `0` to `1`. `1.0` = pure AI (sharpest, can look artificial); `0.45` = balanced; `0.30` = natural; `0` = plain Lanczos resize, without running the AI at all (like `--no-ai`). Values outside 0–1 are clamped. |
+| `--no-ai` | AI on | Skip the AI entirely: no model is loaded, and `--device` and the other AI settings don't matter. What's left is the pre-cleaning (`--profile`), a plain Lanczos resize (`--scale`) and the frame-rate change (`--output-fps`), at about the speed of decoding and encoding. `--no-ai --same-resolution --output-fps 60` only changes the frame rate. |
 | `--profile NAME` | `none` | Clean-up filter applied *before* the AI. See [Pre-cleaning profiles](#pre-cleaning-profiles) or `framelift --list-profiles`. |
-| `--output-fps FPS` | same as input | Output frame rate. Higher values repeat frames in an even pattern so the **duration stays the same** (e.g. 24 → 60 fps writes each frame 2 or 3 times). It can't be lower than the input's rate. This doesn't create new motion (it isn't interpolation), but it's handy when a platform or editor expects 60 fps. |
+| `--output-fps FPS` | same as input | Output frame rate. Higher values repeat frames in an even pattern so the **duration stays the same** (e.g. 24 → 60 fps writes each frame 2 or 3 times). It can't be lower than the input's rate. On its own this doesn't create new motion, but it's handy when a platform or editor expects 60 fps; add `--interpolate` for real in-between frames. |
+| `--interpolate` | off | Draw the extra frames with [RIFE](https://github.com/hzwer/Practical-RIFE) instead of repeating them: new in-between frames, so motion really looks smoother. Without `--output-fps`, it doubles the frame rate. Works with the AI (it runs on the finished frames, so the AI still runs once per original frame) or with `--no-ai`. Uses the same device as the AI (`--device`, `--half`, `--backend`); its weights (25 MB) are downloaded on first use. Scene cuts are repeated, not blended. Fast motion and things crossing each other (hands, hair) can show small artifacts. Pick an exact multiple of the input's rate (or leave `--output-fps` out): at 60 fps from 29.99, the in-between moments drift and RIFE draws up to ~75% more frames. framelift warns when that's the case and tells you the exact rate to use. |
 
 ### Which frames to process
 
@@ -643,6 +666,19 @@ if result.resume_from:
     print("Continue later with start_frame =", result.resume_from)
 ```
 
+Without the AI (`--no-ai`), for example to only change the frame rate:
+
+```python
+enhance_video("in.mp4", "in_60fps.mp4", ai=False, same_resolution=True, output_fps=60)
+```
+
+With RIFE's in-between frames (`--interpolate`):
+
+```python
+result = enhance_video("in.mp4", "smooth.mp4", output_fps=60, interpolate=True)
+print(result.frames_interpolated, "new frames drawn by RIFE")
+```
+
 ### Reusable settings and batch processing
 
 `VideoEnhancer` loads the model once and reuses it for every video:
@@ -848,6 +884,7 @@ framelift/
 │   ├── filters.py     # pre-cleaning profiles (declarative recipes)
 │   ├── frames.py      # resize, blend, brightness, fps cadence
 │   ├── upscaler.py    # Real-ESRGAN wrapper
+│   ├── interpolation.py  # RIFE in-between frames for --interpolate
 │   ├── models.py      # model catalog + safe weight downloads
 │   ├── device.py      # CUDA/CPU selection and PyTorch tuning
 │   ├── encoder.py     # FFmpegWriter: raw frames → MP4
@@ -894,6 +931,10 @@ What changed — including a few bug fixes — is listed in the
 - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) by Xintao Wang et al. (BSD-3-Clause),
   which does the actual super-resolution. Model weights are distributed by that project
   under its terms.
+- [RIFE](https://github.com/hzwer/Practical-RIFE) by Zhewei Huang et al. (MIT), which
+  draws the in-between frames for `--interpolate`. framelift includes its network
+  definition (version 4.26) and downloads the weights from
+  [vs-rife](https://github.com/HolyWu/vs-rife) (MIT).
 - [BasicSR](https://github.com/XPixelGroup/BasicSR), [PyTorch](https://pytorch.org),
   [OpenCV](https://opencv.org) and [FFmpeg](https://ffmpeg.org).
 

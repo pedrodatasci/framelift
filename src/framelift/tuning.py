@@ -740,6 +740,8 @@ def _tiled_seconds(upscaler: AIUpscaler, frame: Frame, options: EnhanceOptions) 
 class _TimedEnhancer(VideoEnhancer):
     """A :class:`VideoEnhancer` that notes when each frame is ready to be written."""
 
+    reuse_repeated_frames = False  # measure the AI on every frame, stills included
+
     def __init__(self, options: EnhanceOptions) -> None:
         super().__init__(options)
         self.marks: list[float] = []

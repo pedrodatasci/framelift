@@ -104,3 +104,20 @@ def test_trim_is_dispatched_as_a_subcommand(capsys):
         main(["trim", "--help"])
     assert exc.value.code == 0
     assert "--start" in capsys.readouterr().out
+
+
+def test_no_ai_flag_round_trips():
+    from framelift.cli import options_to_args
+
+    options = options_from_args(build_parser().parse_args(["-i", "a", "-o", "b", "--no-ai"]))
+    assert options.ai is False and not options.uses_ai
+    assert options_to_args(options) == ["--no-ai"]
+
+
+def test_interpolate_flag_round_trips():
+    from framelift.cli import options_to_args
+
+    args = ["-i", "a", "-o", "b", "--interpolate", "--output-fps", "60"]
+    options = options_from_args(build_parser().parse_args(args))
+    assert options.interpolate is True and options.output_fps == 60
+    assert options_to_args(options) == ["--output-fps", "60", "--interpolate"]

@@ -43,10 +43,21 @@ class EnhanceOptions:
     """Keep the exact input resolution — clean the image up without resizing it."""
 
     output_fps: float | None = None
-    """Output frame rate. ``None`` keeps the input's. Higher values duplicate frames."""
+    """Output frame rate. ``None`` keeps the input's. Higher values repeat frames, or
+    draw new in-between ones with ``interpolate``."""
 
     ai_strength: float = 0.45
     """How much of the AI result to keep, from 0.0 (none) to 1.0 (all of it)."""
+
+    ai: bool = True
+    """Run the AI. ``False`` (``--no-ai``) skips it entirely, without loading a model:
+    what's left is pre-cleaning, a classic Lanczos resize and the frame-rate change.
+    ``ai_strength=0`` does the same."""
+
+    interpolate: bool = False
+    """Draw the extra frames of a higher ``output_fps`` with RIFE (real in-between frames,
+    smoother motion) instead of repeating frames. Without ``output_fps``, it doubles the
+    frame rate. Works with or without the AI."""
 
     profile: str = "none"
     """Pre-cleaning filter applied before the AI. See :data:`framelift.PROFILES`."""
@@ -128,6 +139,11 @@ class EnhanceOptions:
     def clamped_ai_strength(self) -> float:
         """``ai_strength`` forced into the valid 0.0–1.0 range."""
         return max(0.0, min(1.0, float(self.ai_strength)))
+
+    @property
+    def uses_ai(self) -> bool:
+        """True when the AI contributes to the output: ``ai`` is on and its strength is > 0."""
+        return self.ai and self.clamped_ai_strength > 0
 
     def validate(self) -> None:
         """Raise :class:`InvalidOptionError` if any option can't possibly work.

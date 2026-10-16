@@ -4,6 +4,95 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-10-15
+
+### Added
+
+- **A warning when `--output-fps` is almost, but not exactly, a multiple of the input's
+  rate with `--interpolate`.** Between 29.99 and 60 fps, for example, the in-between
+  moments slowly drift off the original frames until nearly every output frame has to be
+  drawn: 2,835 RIFE frames for a 1,635-frame video, against 1,634 at exactly 2x (59.98
+  fps), which looks the same. The warning gives both counts and the rate to use.
+- **Identical consecutive frames reuse the result.** A frame identical to the one before
+  it skips the AI (the result is the same, pixel for pixel) and RIFE draws nothing between
+  the two. This helps with stills, title cards, renders and screen recordings; on camera
+  footage that went through a lossy encoder, repeated frames are rarely identical, so
+  expect no change there. `EnhanceResult.frames_reused` counts them.
+
+### Changed
+
+- With `--interpolate`, a rate typed with a few decimals that's within 0.01 fps of an
+  exact multiple (59.94 for 29.97 x 2) is used as that exact multiple.
+- `framelift tune` still runs the AI on every frame, so its timings stay comparable.
+
+### Compatibility
+
+- Every flag, default and API from 1.7 still works the same. With the AI on, the output
+  is exactly the same as before. With `--interpolate`, frames between two identical
+  frames are now repeats instead of being drawn by RIFE.
+
+## [1.7.0] — 2026-10-15
+
+### Added
+
+- **`--interpolate`: smoother motion with RIFE.** The extra frames of a higher frame rate
+  are drawn by [RIFE](https://github.com/hzwer/Practical-RIFE) 4.26, as real in-between
+  frames, instead of being repeated. Without `--output-fps` it doubles the frame rate.
+  - Works with the AI or with `--no-ai`. RIFE runs on the finished frames, so the AI still
+    runs once per original frame.
+  - Uses the same device as the AI: an NVIDIA GPU or the CPU through PyTorch, or an Intel
+    GPU through OpenVINO (or the CPU with `--backend openvino`). `--half` applies to it on
+    GPUs.
+  - The output has exactly as many frames as repeating gives, so the duration and the audio
+    sync don't change, and stopping and resuming work as before.
+  - Scene cuts are detected and repeated instead of blended. Moments within 5% of an
+    original frame show that frame, which saves RIFE runs at rates like 29.97 → 60.
+  - Its weights (25 MB) are downloaded on first use. On OpenVINO, the converted model is
+    saved in `weights/openvino_cache/`, so later runs start faster.
+- Python API: `EnhanceOptions.interpolate`, `EnhanceResult.frames_interpolated`, and
+  `framelift.interpolation` (`FrameInterpolator`, `Retimer`).
+
+### Changed
+
+- `--output-fps` and the summary table mention RIFE when it's used.
+
+### Compatibility
+
+- Every flag, default and API from 1.6 still works the same. Without `--interpolate`,
+  the output is unchanged.
+
+## [1.6.0] — 2026-10-15
+
+### Added
+
+- **`--no-ai`**: skip the AI entirely. No model is loaded and `--device` doesn't matter;
+  each frame gets the pre-cleaning (`--profile`), a plain Lanczos resize (`--scale`) and
+  the frame-rate change (`--output-fps`), at about the speed of decoding and encoding. To
+  only change the frame rate: `--no-ai --same-resolution --output-fps 60`. Everything else
+  works as usual: audio, `--pick-range`, stopping and resuming.
+- Python API: `EnhanceOptions.ai` (`ai=False` is `--no-ai`) and `EnhanceOptions.uses_ai`.
+
+### Changed
+
+- **`--ai-strength 0` no longer runs the AI.** It used to run the model on every frame and
+  then discard the result; now it works like `--no-ai`, with exactly the same output as
+  before (checked frame by frame), in a fraction of the time (0.7 s instead of 42.7 s for
+  10 frames at 720x480 on one CPU core, in our test).
+- **OpenVINO (`--device igpu`, `--backend openvino`) takes and returns 8-bit frames.** The
+  conversions around the network (to floats and back, with Real-ESRGAN's rounding) are
+  compiled into the model, so on an Intel GPU they run on the GPU instead of the CPU, and a
+  quarter of the data comes back. The output stays within 1 level out of 255 of PyTorch's,
+  as before.
+- Runs without the AI say "Processing" and "processed" instead of "Enhancing" and
+  "enhanced", and their summary table shows "no AI" instead of the model and device.
+- Without the AI, the first frame isn't checked for being black (the check is there to
+  catch model and driver problems), so a video that opens on a black frame converts fine.
+
+### Compatibility
+
+- Every flag, default and API from 1.5 still works the same. With the AI on, the output is
+  unchanged on PyTorch, and within 1 level out of 255 on OpenVINO, as before.
+
 ## [1.5.0] — 2026-10-10
 
 ### Added

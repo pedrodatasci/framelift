@@ -76,7 +76,10 @@ mais nítidas. Processado na CPU de um notebook.
   *sua* máquina.
 - **Pipeline rápido.** Os frames são decodificados numa thread em segundo plano enquanto
   a IA trabalha, e vão direto para o FFmpeg, sem arquivos de imagem temporários no disco.
-- **Conversão de frame rate.** Transforme 24/30 fps em 60 fps sem mudar a duração.
+- **Movimento mais fluido (RIFE).** Transforme 24/30 fps em 60 fps com frames
+  intermediários de verdade, desenhados pelo [RIFE](https://github.com/hzwer/Practical-RIFE)
+  (`--interpolate`), ou só repetindo frames. Nos dois casos a duração não muda, e funciona
+  junto com a IA ou sozinho (`--no-ai`).
 - **Uma biblioteca Python de verdade**, não só um script: `enhance_video(...)`, opções
   tipadas, resultados estruturados e exceções específicas.
 - **Os modelos se baixam sozinhos** no primeiro uso.
@@ -123,9 +126,24 @@ mais nítidas. Processado na CPU de um notebook.
 4. **Codificação.** Os frames crus vão por pipe para o FFmpeg (libx264 ou NVENC). O arquivo
    é gravado com um nome temporário e só é renomeado quando o FFmpeg termina sem erros.
 
+Para aumentar o frame rate (`--output-fps`), os frames são repetidos num padrão uniforme.
+Com `--interpolate`, o RIFE desenha os frames extras, entre os passos 3 e 4: ele estima
+como tudo se move de um frame pronto para o próximo e gera os momentos intermediários. A
+IA continua rodando uma vez por frame original. Num corte de cena não há movimento para
+seguir, então esses frames são repetidos em vez de misturados.
+
+Um frame idêntico ao anterior (uma imagem parada, um frame duplicado) não passa pela IA de
+novo: o resultado seria o mesmo, pixel por pixel, então o anterior é reaproveitado, e o
+RIFE não tem nada a desenhar entre os dois.
+
 Antes de embarcar em horas de processamento, o framelift confere se o primeiro frame não
 está preto, tanto antes quanto depois da IA. Isso pega cedo problemas de decodificação,
 pesos corrompidos e falhas de driver.
+
+Com `--no-ai` (ou `--ai-strength 0`), o passo 2 é pulado e nenhum modelo é carregado:
+cada frame recebe só o resize Lanczos. O mesmo pipeline passa então a redimensionar,
+pré-limpar ou mudar o frame rate na velocidade de decodificar e codificar o vídeo. A
+checagem de frame preto também é pulada, porque ela existe para pegar problemas da IA.
 
 ## Instalação
 
@@ -408,6 +426,9 @@ Códigos de saída: `0` salvo, `1` erro ou janela fechada sem escolher, `130`
 | Máximo de detalhe (lento) | `framelift -i in.mp4 -o out.mp4 --model realesrgan-x4plus --ai-strength 0.6` |
 | Restaurar sem redimensionar | `framelift -i in.mp4 -o out.mp4 --same-resolution` |
 | Converter para 60 fps | `framelift -i in.mp4 -o out.mp4 --output-fps 60` |
+| Só mudar o frame rate (sem IA, rápido) | `framelift -i in.mp4 -o out.mp4 --no-ai --same-resolution --output-fps 60` |
+| Movimento mais fluido: 60 fps com RIFE | `framelift -i in.mp4 -o out.mp4 --output-fps 60 --interpolate` |
+| Só deixar mais fluido (sem IA) | `framelift -i in.mp4 -o out.mp4 --no-ai --same-resolution --interpolate` |
 | GPU NVIDIA a toda velocidade | `framelift -i in.mp4 -o out.mp4 --device cuda --half --tile 768 --encoder nvenc` |
 | Notebook Intel (CPU) | `framelift -i in.mp4 -o out.mp4 --device cpu --tile 128 --torch-threads 8` |
 | Retomar depois do frame 1200 | `framelift -i in.mp4 -o parte2.mp4 --start-frame 1201` |
@@ -436,9 +457,11 @@ framelift -i ENTRADA -o SAIDA [opções]
 | `--model NOME` | `realesr-animevideov3` | Modelo do Real-ESRGAN. Veja [Modelos](#modelos) ou `framelift --list-models`. |
 | `--scale FATOR` | `1.5` | Tamanho da saída em relação à entrada: `2` dobra largura e altura, `1.25` aumenta 25%. Valores abaixo de 1 reduzem o vídeo (que ainda passa pela IA). Ignorado com `--same-resolution`. |
 | `--same-resolution` | desligado | Mantém exatamente a resolução de entrada. Útil para melhorar a qualidade sem aumentar o arquivo. |
-| `--ai-strength N` | `0.45` | Participação da IA na imagem final, de `0` a `1`. `1.0` = IA pura (mais nítido, pode parecer artificial); `0.45` = equilibrado; `0.30` = natural; `0` = só resize Lanczos. Valores fora de 0–1 são limitados. |
+| `--ai-strength N` | `0.45` | Participação da IA na imagem final, de `0` a `1`. `1.0` = IA pura (mais nítido, pode parecer artificial); `0.45` = equilibrado; `0.30` = natural; `0` = só resize Lanczos, sem nem rodar a IA (como o `--no-ai`). Valores fora de 0–1 são limitados. |
+| `--no-ai` | IA ligada | Pula a IA por completo: nenhum modelo é carregado, e o `--device` e as outras opções da IA não importam. Sobram a pré-limpeza (`--profile`), um resize Lanczos comum (`--scale`) e a mudança de frame rate (`--output-fps`), na velocidade de decodificar e codificar o vídeo. `--no-ai --same-resolution --output-fps 60` só muda o frame rate. |
 | `--profile NOME` | `none` | Filtro de limpeza aplicado *antes* da IA. Veja [Perfis](#perfis-de-pré-limpeza) ou `framelift --list-profiles`. |
-| `--output-fps FPS` | igual à entrada | Frame rate da saída. Valores maiores repetem frames num padrão uniforme, então **a duração não muda** (ex.: de 24 para 60 fps, cada frame é escrito 2 ou 3 vezes). Não pode ser menor que o da entrada. Não cria movimento novo (não é interpolação), mas ajuda quando uma plataforma ou editor exige 60 fps. |
+| `--output-fps FPS` | igual à entrada | Frame rate da saída. Valores maiores repetem frames num padrão uniforme, então **a duração não muda** (ex.: de 24 para 60 fps, cada frame é escrito 2 ou 3 vezes). Não pode ser menor que o da entrada. Sozinho, não cria movimento novo, mas ajuda quando uma plataforma ou editor exige 60 fps; acrescente `--interpolate` para frames intermediários de verdade. |
+| `--interpolate` | desligado | Desenha os frames extras com o [RIFE](https://github.com/hzwer/Practical-RIFE) em vez de repeti-los: frames intermediários novos, então o movimento fica mais fluido de verdade. Sem `--output-fps`, dobra o frame rate. Funciona com a IA (ele roda nos frames prontos, então a IA continua rodando uma vez por frame original) ou com `--no-ai`. Usa o mesmo dispositivo da IA (`--device`, `--half`, `--backend`); os pesos (25 MB) são baixados no primeiro uso. Cortes de cena são repetidos, não misturados. Movimentos muito rápidos e coisas se cruzando (mãos, cabelo) podem ter pequenos artefatos. Escolha um múltiplo exato do fps da entrada (ou deixe o `--output-fps` de fora): a 60 fps a partir de 29,99, os momentos intermediários se deslocam e o RIFE desenha até ~75% mais frames. O framelift avisa quando isso acontece e diz o fps exato a usar. |
 
 ### Quais frames processar
 
@@ -654,6 +677,19 @@ if result.resume_from:
     print("Continue depois com start_frame =", result.resume_from)
 ```
 
+Sem a IA (`--no-ai`), por exemplo para só mudar o frame rate:
+
+```python
+enhance_video("in.mp4", "in_60fps.mp4", ai=False, same_resolution=True, output_fps=60)
+```
+
+Com os frames intermediários do RIFE (`--interpolate`):
+
+```python
+result = enhance_video("in.mp4", "suave.mp4", output_fps=60, interpolate=True)
+print(result.frames_interpolated, "frames novos desenhados pelo RIFE")
+```
+
 ### Configuração reutilizável e processamento em lote
 
 O `VideoEnhancer` carrega o modelo uma vez só e o reaproveita em todos os vídeos:
@@ -858,6 +894,7 @@ framelift/
 │   ├── filters.py     # perfis de pré-limpeza (receitas declarativas)
 │   ├── frames.py      # resize, mistura, brilho, cadência de fps
 │   ├── upscaler.py    # wrapper do Real-ESRGAN
+│   ├── interpolation.py  # frames intermediários do RIFE (--interpolate)
 │   ├── models.py      # catálogo de modelos + download seguro dos pesos
 │   ├── device.py      # escolha entre CUDA/CPU e ajustes do PyTorch
 │   ├── encoder.py     # FFmpegWriter: frames crus → MP4
@@ -904,6 +941,9 @@ O que mudou, incluindo algumas correções de bugs, está no
 - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN), de Xintao Wang et al.
   (BSD-3-Clause), que faz a super-resolução propriamente dita. Os pesos dos modelos são
   distribuídos por esse projeto, sob os termos dele.
+- [RIFE](https://github.com/hzwer/Practical-RIFE), de Zhewei Huang et al. (MIT), que
+  desenha os frames intermediários do `--interpolate`. O framelift inclui a definição da
+  rede (versão 4.26) e baixa os pesos do [vs-rife](https://github.com/HolyWu/vs-rife) (MIT).
 - [BasicSR](https://github.com/XPixelGroup/BasicSR), [PyTorch](https://pytorch.org),
   [OpenCV](https://opencv.org) e [FFmpeg](https://ffmpeg.org).
 

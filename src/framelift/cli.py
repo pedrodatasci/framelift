@@ -33,6 +33,13 @@ examples:
   # NVIDIA GPU at full speed
   framelift -i in.mp4 -o out.mp4 --device cuda --half --tile 768 --encoder nvenc
 
+  # Only change the frame rate (no AI, same size): fast
+  framelift -i in.mp4 -o in_60fps.mp4 --no-ai --same-resolution --output-fps 60
+
+  # Smoother motion: 60 fps with new in-between frames (RIFE), with or without the AI
+  framelift -i in.mp4 -o smooth.mp4 --output-fps 60 --interpolate
+  framelift -i in.mp4 -o smooth.mp4 --no-ai --same-resolution --interpolate
+
   # Resume a run that stopped after frame 1200
   framelift -i in.mp4 -o part2.mp4 --start-frame 1201
 
@@ -97,8 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=defaults.ai_strength,
         help="How much of the AI result to keep, from 0 to 1. 1.0 = full AI, "
-        "0.45 = balanced, 0.30 = natural. (default: %(default)s)",
+        "0.45 = balanced, 0.30 = natural. 0 = no AI, like --no-ai. (default: %(default)s)",
     )
+    look.add_argument(
+        "--no-ai", dest="ai", action="store_false",
+        help="Skip the AI (no model is loaded): only pre-cleaning, a classic Lanczos resize "
+             "and the frame-rate change. Much faster. To only change the frame rate: "
+             "--no-ai --same-resolution --output-fps 60.",
+    )  # fmt: skip
     look.add_argument(
         "--profile",
         default=defaults.profile,
@@ -111,9 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=defaults.output_fps,
         metavar="FPS",
-        help="Output frame rate, e.g. 60. Frames are repeated to reach it, so the "
-        "duration doesn't change. Can't be lower than the input's. (default: same as input)",
+        help="Output frame rate, e.g. 60. Frames are repeated to reach it (or drawn by RIFE "
+        "with --interpolate), so the duration doesn't change. Can't be lower than the "
+        "input's. (default: same as input)",
     )
+    look.add_argument(
+        "--interpolate", action="store_true",
+        help="Draw the extra frames with RIFE (new in-between frames, smoother motion) "
+             "instead of repeating them. Without --output-fps, doubles the frame rate. "
+             "Works with the AI or with --no-ai. Scene cuts are repeated, not blended.",
+    )  # fmt: skip
 
     frames = parser.add_argument_group("which frames to process")
     frames.add_argument(
@@ -408,16 +428,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         from .pipeline import enhance_video  # heavy (PyTorch): import only when needed
 
+        options = options_from_args(args)
         with GracefulInterrupt() as stop_event:
             log.info(
                 "framelift %s — press Ctrl+C once to stop early and keep what's done.", __version__
             )
-            result = enhance_video(
-                args.input,
-                args.output,
-                options_from_args(args),
-                stop_event=stop_event,
-            )
+            result = enhance_video(args.input, args.output, options, stop_event=stop_event)
     except FrameliftError as exc:
         log.error("%s", exc)
         return 1
@@ -427,21 +443,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.error("Run again with -v to see the full traceback.")
         return 1
 
-    _report(result, args.input if args.pick_range else None)
+    _report(result, args.input if args.pick_range else None, ai=options.uses_ai)
     return 0
 
 
-def _report(result, cut_input: str | None = None) -> None:
+def _report(result, cut_input: str | None = None, *, ai: bool = True) -> None:
     minutes, seconds = divmod(int(result.elapsed_seconds), 60)
     status = "Saved a partial video" if result.interrupted else "Done!"
 
     log.info(
-        "\n%s %s\n  frames %d → %d (%d enhanced, %d written) in %dm%02ds",
+        "\n%s %s\n  frames %d → %d (%d %s, %d written) in %dm%02ds",
         status,
         result.output_path,
         result.first_frame,
         result.last_frame,
         result.frames_processed,
+        "enhanced" if ai else "processed",
         result.frames_written,
         minutes,
         seconds,

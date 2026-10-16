@@ -7,6 +7,12 @@
     │ decode+clean │ (prefetch) │  (GPU/CPU)  │        │       │  (raw)  │  x264  │
     └──────────────┘            └─────────────┘        └───────┘         └────────┘
 
+Without the AI (``--no-ai``, or an AI strength of 0) no model is loaded and each frame
+just gets the classic resize, so the same pipeline also serves to resize, pre-clean or
+change the frame rate quickly. With ``--interpolate``, the finished frames go through
+RIFE (:mod:`framelift.interpolation`), which draws the extra frames of the higher frame
+rate instead of repeating them.
+
 The public entry points are :func:`enhance_video` for one-off calls and
 :class:`VideoEnhancer` when processing several videos with the same settings
 (the model is loaded once and reused).
@@ -23,6 +29,7 @@ from concurrent.futures import Future
 from pathlib import Path
 from typing import Callable, Union
 
+import numpy as np
 from tqdm import tqdm
 
 from .audio import add_audio
@@ -38,10 +45,11 @@ from .device import (
 from .encoder import ENCODER_LABELS, FFmpegWriter, require_binary, select_encoder
 from .errors import BlackFrameError, InvalidOptionError, NothingToDoError, VideoReadError
 from .filters import Frame, get_profile
-from .frames import blend_with_classic_upscale, mean_brightness, repeat_count
+from .frames import blend_with_classic_upscale, mean_brightness, repeat_count, resize_exact
+from .interpolation import FrameInterpolator, Retimer, ensure_rife_weights
 from .models import ensure_weights, get_model
 from .options import EnhanceOptions
-from .planning import EnhanceResult, RunPlan, plan_run
+from .planning import EnhanceResult, RunPlan, interpolation_advice, plan_run
 from .upscaler import AIUpscaler
 from .video import FrameReader, SourceFrame, probe_video
 
@@ -63,6 +71,10 @@ class VideoEnhancer:
     >>> enhancer.enhance("a.mp4", "a_hd.mp4")    # doctest: +SKIP
     >>> enhancer.enhance("b.mp4", "b_hd.mp4")    # model is reused  # doctest: +SKIP
     """
+
+    reuse_repeated_frames = True
+    """Reuse the result of a frame identical to the one before it, instead of running the
+    AI again (the result would be the same, pixel for pixel)."""
 
     def __init__(self, options: EnhanceOptions | None = None) -> None:
         self.options = options or EnhanceOptions()
@@ -94,24 +106,31 @@ class VideoEnhancer:
         if not input_path.exists():
             raise VideoReadError(f"Input video not found: {input_path}")
 
-        device = resolve_device(options.device, options.gpu_id)
-        configure_torch(_threads_per_worker(options, device))
-        encoder = select_encoder(options.encoder, device.kind)
+        # Without the AI or RIFE there's no device to pick (or fail on) and no model to load.
+        needs_device = options.uses_ai or options.interpolate
+        device = resolve_device(options.device, options.gpu_id) if needs_device else None
+        if device is not None:
+            threads = (
+                _threads_per_worker(options, device) if options.uses_ai else options.torch_threads
+            )
+            configure_torch(threads)
+        encoder = select_encoder(options.encoder, device.kind if device else None)
 
-        if options.half and not device.is_gpu:
+        if device is not None and options.half and not device.is_gpu:
             log.info("FP16 (--half) only applies to GPUs, so it's ignored on CPU.")
 
         video = probe_video(input_path)
         plan = plan_run(video, options)
         _log_plan(plan, options, output_path, device, encoder)
 
-        if not device.is_gpu:
+        if device is not None and not device.is_gpu:
             log.warning(
-                "Running the AI on the CPU. It works (Intel Iris laptops included), "
-                "but expect it to be much slower than an NVIDIA GPU."
+                "Running %s on the CPU. It works (Intel Iris laptops included), "
+                "but expect it to be much slower than an NVIDIA GPU.",
+                "the AI" if options.uses_ai else "RIFE",
             )
 
-        upscaler = self._get_upscaler(device)
+        upscaler = self._get_upscaler(device) if options.uses_ai else None
         return self._run(plan, upscaler, device, encoder, output_path, stop_event, show_progress)
 
     # -- internals -------------------------------------------------------------
@@ -144,8 +163,8 @@ class VideoEnhancer:
     def _run(
         self,
         plan: RunPlan,
-        upscaler: AIUpscaler,
-        device: Device,
+        upscaler: AIUpscaler | None,
+        device: Device | None,
         encoder: str,
         output_path: Path,
         stop_event: threading.Event,
@@ -154,7 +173,23 @@ class VideoEnhancer:
         opts = self.options
         started_at = time.perf_counter()
 
-        if plan.duplicates_frames:
+        retimer = None
+        if opts.interpolate:
+            weights = ensure_rife_weights(Path(opts.weights_dir).resolve())
+            interpolator = FrameInterpolator(weights, device, plan.width, plan.height,
+                                             half=opts.half and device.is_gpu,
+                                             backend=opts.backend)  # fmt: skip
+            retimer = Retimer(plan.video.fps, plan.output_fps, interpolator)
+            log.info(
+                "Converting %.3f → %.3f fps with in-between frames drawn by RIFE "
+                "(duration stays the same).",
+                plan.video.fps,
+                plan.output_fps,
+            )
+            advice = interpolation_advice(plan.video.fps, plan.output_fps, plan.frames_to_process)
+            if advice:
+                log.warning(advice)
+        elif plan.duplicates_frames:
             log.info(
                 "Converting %.3f → %.3f fps by repeating frames (duration stays the same).",
                 plan.video.fps,
@@ -179,34 +214,56 @@ class VideoEnhancer:
         progress = tqdm(
             total=plan.frames_to_process,
             unit="frame",
-            desc="Enhancing",
+            desc="Enhancing" if upscaler is not None else "Processing",
             disable=not show_progress,
         )
         laps = _Laps(sync=lambda: synchronize(device) if opts.debug_timings else None)
 
         processed = 0
+        reused = 0
         last_frame = plan.start_frame - 1
+        # Identical consecutive frames (stills, duplicated frames) skip the AI: their
+        # result is the previous one. Comparing costs a few ms, so only with the AI on.
+        check_repeats = upscaler is not None and self.reuse_repeated_frames
+        previous_source: Frame | None = None
+        last_output: list[Frame | None] = [None]
         finished = False
         # Frames whose AI is running (or done) in the workers, oldest first.
         in_flight: deque[tuple[SourceFrame, Future]] = deque()
-        workers = _AIWorkers(upscaler, opts.workers)
+        workers = _AIWorkers(upscaler, opts.workers) if upscaler is not None else _NoAI()
+        # Frames handed to the AI before the oldest is finished: one per worker. Without
+        # the AI there's nothing to wait for, so each frame is finished right away.
+        ahead = opts.workers if upscaler is not None else 0
         reader_wait = [0.0]  # time the last frame took to come out of the reader
 
         def finish_oldest() -> None:
             """Wait for the oldest frame's AI, then blend, encode and count it."""
-            nonlocal processed, last_frame
+            nonlocal processed, last_frame, reused
             frame, result = in_flight.popleft()
             laps.restart()
             laps.durations["queue"] = reader_wait[0]
-            native = result.result()
-            laps.sync()
-            laps.lap("ai")
-
-            output = self._finish_frame(
-                frame, native, plan, upscaler, laps, is_first=processed == 0
-            )
-            copies = repeat_count(processed + 1, plan.video.fps, plan.output_fps)
-            writer.write(output, copies=copies)
+            if result is None:  # identical to the frame before: same result
+                output = last_output[0]
+                reused += 1
+                laps.lap("reused")
+            else:
+                native = result.result()
+                if upscaler is not None:
+                    laps.sync()
+                    laps.lap("ai")
+                output = self._finish_frame(
+                    frame, native, plan, upscaler, laps, is_first=processed == 0
+                )
+            last_output[0] = output
+            if retimer is None:
+                copies = repeat_count(processed + 1, plan.video.fps, plan.output_fps)
+                writer.write(output, copies=copies)
+            else:
+                ready = retimer.push(output, frame.image)
+                laps.sync()
+                laps.lap("interpolate")
+                for image in ready:
+                    writer.write(image)
             laps.lap("write")
 
             processed += 1
@@ -223,13 +280,19 @@ class VideoEnhancer:
                     if stop_event.is_set() and submitted > 0:
                         break
 
-                    if submitted == 0:
+                    if submitted == 0 and upscaler is not None:
                         _ensure_not_black(frame.image, _BLACK_BEFORE_AI)
-                    in_flight.append((frame, workers.submit(frame.image)))
+                    repeat = (
+                        check_repeats
+                        and previous_source is not None
+                        and (np.array_equal(frame.image, previous_source))
+                    )
+                    in_flight.append((frame, None if repeat else workers.submit(frame.image)))
+                    previous_source = frame.image
 
                     # Keep every worker busy with a frame while this thread finishes the
                     # oldest one (resize, blend, encode): the two overlap.
-                    if len(in_flight) > opts.workers:
+                    if len(in_flight) > ahead:
                         finish_oldest()
 
                     if stop_event.is_set():
@@ -247,6 +310,22 @@ class VideoEnhancer:
             if interrupted:
                 log.info("Stopping early — finishing the MP4 with the %d frames done…", processed)
 
+            if retimer is not None:
+                last, copies = retimer.flush()
+                writer.write(last, copies=copies)
+                instead = [f"{retimer.scene_cuts} at scene cuts"] if retimer.scene_cuts else []
+                if retimer.unchanged:
+                    instead.append(f"{retimer.unchanged} between identical frames")
+                log.info(
+                    "RIFE drew %d in-between frames%s.",
+                    retimer.interpolated,
+                    f" (repeated instead: {', '.join(instead)})" if instead else "",
+                )
+            if reused:
+                log.info(
+                    "%d frames were identical to the one before; the AI's result was reused.",
+                    reused,
+                )
             writer.finish()
             audio = self._add_audio(plan, output_path, processed) if opts.audio else "disabled"
             finished = True
@@ -268,6 +347,8 @@ class VideoEnhancer:
             interrupted=interrupted,
             audio=audio,
             elapsed_seconds=time.perf_counter() - started_at,
+            frames_interpolated=retimer.interpolated if retimer is not None else 0,
+            frames_reused=reused,
         )
 
     def _add_audio(self, plan: RunPlan, output_path: Path, processed: int) -> str:
@@ -288,15 +369,21 @@ class VideoEnhancer:
     def _finish_frame(
         self,
         frame: SourceFrame,
-        native: Frame,
+        native: Frame | None,
         plan: RunPlan,
-        upscaler: AIUpscaler,
+        upscaler: AIUpscaler | None,
         laps: _Laps,
         *,
         is_first: bool,
     ) -> Frame:
         """Bring the AI's output (at the model's own scale) to size and blend it with a
-        classic resize."""
+        classic resize. Without the AI, the classic resize alone (what a blend with an AI
+        strength of 0 gives, pixel for pixel)."""
+        if upscaler is None:
+            output = resize_exact(frame.image, plan.width, plan.height)
+            laps.lap("resize")
+            return output
+
         enhanced = upscaler.finish(native, frame.image.shape, plan.scale)
         output = blend_with_classic_upscale(
             frame.image, enhanced, plan.width, plan.height, self.options.ai_strength
@@ -315,7 +402,7 @@ class VideoEnhancer:
         reader: FrameReader,
         writer: FFmpegWriter,
         laps: _Laps,
-        device: Device,
+        device: Device | None,
     ) -> None:
         """``--debug-timings``: periodic timing report and optional memory cleanup."""
         opts = self.options
@@ -373,6 +460,18 @@ _BLACK_AFTER_AI = (
     "The first enhanced frame came out black. This usually points to a corrupt "
     "weights file or a GPU/driver problem — try --device cpu to compare."
 )
+
+
+class _NoAI:
+    """Stands in for :class:`_AIWorkers` when the AI is off: every frame is "done" at once."""
+
+    def submit(self, image: Frame) -> Future:
+        result: Future = Future()
+        result.set_result(None)
+        return result
+
+    def close(self, wait: bool = True) -> None:
+        pass
 
 
 class _AIWorkers:
@@ -457,30 +556,41 @@ def _log_plan(
     plan: RunPlan,
     options: EnhanceOptions,
     output_path: Path,
-    device: Device,
+    device: Device | None,
     encoder: str,
 ) -> None:
     video = plan.video
     size_note = "same size" if options.same_resolution else f"{plan.scale:g}x"
-    fp16 = "on" if options.half and device.is_gpu else "off"
     encoder_label = ENCODER_LABELS[encoder]
     if encoder == "cpu":
         encoder_label += f", {options.x264_preset}"
 
-    threads = current_cpu_threads()
+    verb = "enhance" if options.uses_ai else "process"
+    if options.uses_ai:
+        look = (f"model {options.model} · profile {options.profile} · "
+                f"AI strength {options.clamped_ai_strength:.2f}")  # fmt: skip
+    else:
+        resized = (plan.width, plan.height) != (video.width, video.height)
+        look = f"no AI{' (Lanczos resize)' if resized else ''} · profile {options.profile}"
+
     rows = [
         ("Input", f"{video.path.name}  ({video.width}x{video.height} @ {video.fps:.3f} fps, "
                   f"{video.frame_count:,} frames)"),
-        ("Output", f"{output_path.name}  ({plan.width}x{plan.height} @ {plan.output_fps:.3f} fps, "
-                   f"{size_note})"),
+        ("Output", f"{output_path.name}  ({plan.width}x{plan.height} @ {plan.output_fps:.3f} fps"
+                   f"{' with RIFE' if options.interpolate else ''}, {size_note})"),
         ("Frames", f"{plan.start_frame:,} → {plan.last_frame:,}  ({plan.frames_to_process:,} to "
-                   f"enhance, ~{plan.expected_output_frames:,} to write)"),
-        ("Look", f"model {options.model} · profile {options.profile} · "
-                 f"AI strength {options.clamped_ai_strength:.2f}"),
-        ("Device", f"{device.name} · tile {options.tile} · FP16 {fp16} · "
-                   f"{_workers_label(options, device, threads)}"),
-        ("Encoder", f"{encoder_label} · CRF {options.crf} · prefetch {options.prefetch}"),
+                   f"{verb}, ~{plan.expected_output_frames:,} to write)"),
+        ("Look", look),
     ]  # fmt: skip
+    if device is not None:
+        fp16 = "on" if options.half and device.is_gpu else "off"
+        if options.uses_ai:
+            workers = _workers_label(options, device, current_cpu_threads())
+            details = f"tile {options.tile} · FP16 {fp16} · {workers}"
+        else:
+            details = f"for RIFE · FP16 {fp16}"
+        rows.append(("Device", f"{device.name} · {details}"))
+    rows.append(("Encoder", f"{encoder_label} · CRF {options.crf} · prefetch {options.prefetch}"))
     if options.debug_timings:
         rows.append(("Timings", f"every {options.timing_every} frames"))
 

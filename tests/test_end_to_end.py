@@ -232,3 +232,84 @@ def test_tune_video_tries_two_workers_on_a_multicore_cpu(make_video, options, mo
     assert [run.workers for run in report.real_runs] == [1, 2]
     assert report.real_run in report.real_runs
     assert report.presets["fast"].options.workers == report.real_run.workers
+
+
+@pytest.mark.parametrize("ai_off", [{"ai": False}, {"ai_strength": 0}])
+def test_without_the_ai_no_model_is_loaded(make_video, tmp_path, monkeypatch, ai_off):
+    """--no-ai (or --ai-strength 0): resize and frame-rate change only. No model, and the
+    device doesn't matter (igpu would fail here without an Intel GPU)."""
+
+    def no_model(*args):
+        raise AssertionError("no model should be loaded without the AI")
+
+    monkeypatch.setattr(VideoEnhancer, "_get_upscaler", no_model)
+    output = tmp_path / "out.mp4"
+    result = enhance_video(make_video(frames=6, fps=24), output, device="igpu", scale=2,
+                           output_fps=60, audio=False, show_progress=False, **ai_off)  # fmt: skip
+
+    assert (result.frames_processed, result.frames_written) == (6, 15)
+    info = probe_video(output)
+    assert (info.width, info.height, info.fps) == (128, 96, 60)
+
+
+def test_without_the_ai_frames_are_only_resized(make_video, tmp_path):
+    """Same size and no pre-cleaning: the frames reach the encoder untouched."""
+    from framelift.video import read_frames
+
+    clip = make_video(frames=3)
+    seen = []
+    enhancer = VideoEnhancer(EnhanceOptions(ai=False, same_resolution=True, audio=False))
+    real_finish = enhancer._finish_frame
+
+    def spy(frame, *args, **kwargs):
+        output = real_finish(frame, *args, **kwargs)
+        seen.append((frame.image, output))
+        return output
+
+    enhancer._finish_frame = spy
+    enhancer.enhance(clip, tmp_path / "same.mp4", show_progress=False)
+
+    originals = [image for _, image in read_frames(clip, [1, 2, 3])]
+    assert len(seen) == 3
+    for original, (source, output) in zip(originals, seen):
+        assert (source == original).all() and (output == original).all()
+
+
+@pytest.mark.parametrize("with_ai", [False, True])
+def test_interpolate_writes_in_between_frames(make_video, tmp_path, with_ai):
+    """--interpolate (with or without the AI): new frames, same frame count as repeating."""
+    output = tmp_path / "smooth.mp4"
+    result = enhance_video(make_video(frames=6, fps=24), output, device="cpu", tile=32,
+                           output_fps=60, interpolate=True, ai=with_ai, audio=False,
+                           show_progress=False)  # fmt: skip
+
+    assert (result.frames_processed, result.frames_written) == (6, 15)
+    assert result.frames_interpolated == 10  # 2 per pair of frames, 5 pairs
+    info = probe_video(output)
+    assert info.fps == 60 and info.frame_count == 15
+
+
+def test_identical_frames_reuse_the_result(make_video, tmp_path):
+    """Frames 25-30 of the test clip are identical: 5 of them skip the AI, and the video
+    comes out exactly the same as running the AI on every frame."""
+    clip = make_video(frames=30)
+    outputs = []
+    for reuse in (True, False):
+        enhancer = VideoEnhancer(EnhanceOptions(device="cpu", tile=32, audio=False))
+        enhancer.reuse_repeated_frames = reuse
+        result = enhancer.enhance(clip, tmp_path / f"reuse_{reuse}.mp4", show_progress=False)
+        assert result.frames_reused == (5 if reuse else 0)
+        outputs.append(_decoded(tmp_path / f"reuse_{reuse}.mp4"))
+    assert len(outputs[0]) == 30
+    assert all((a == b).all() for a, b in zip(*outputs))
+
+
+def _decoded(path):
+    import cv2
+
+    capture, frames = cv2.VideoCapture(str(path)), []
+    while True:
+        ok, image = capture.read()
+        if not ok:
+            return frames
+        frames.append(image)
