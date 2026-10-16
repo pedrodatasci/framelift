@@ -151,14 +151,20 @@ def _extract_segment(source: Path, segment: Path, start: float, duration: float)
 
     probe = subprocess.run(
         [find_binary("ffprobe"), "-v", "error", "-select_streams", "a:0",
-         "-show_entries", "packet=pts_time",
-         "-read_intervals", "%+#1", "-of", "csv=p=0", str(segment)],
-        capture_output=True, text=True, errors="replace",
+         "-show_entries", "packet=pts_time:stream=start_time",
+         "-read_intervals", "%+#1", "-of", "json", str(segment)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )  # fmt: skip
-    first = probe.stdout.strip().splitlines()
-    if not first:
+    data = json.loads(probe.stdout or "{}")
+    packets = data.get("packets") or []
+    if not packets:
         return None
-    return max(0.0, _seconds(first[0].strip(",")))
+    # Where the stream starts, rather than its first packet: since FFmpeg 9, the first
+    # packet can carry samples the decoder is told to skip (AAC's encoder delay, 1024
+    # samples), and only the stream's start says where the sound actually begins.
+    streams = data.get("streams") or [{}]
+    start = streams[0].get("start_time", packets[0].get("pts_time"))
+    return max(0.0, _seconds(start))
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess:

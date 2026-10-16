@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.2] — 2026-10-16
+
+### Fixed
+
+- **With FFmpeg 9, the copied audio came out 21 ms early.** FFmpeg 9 keeps AAC's encoder
+  delay (1024 samples) in the first audio packet and tells the decoder to skip it, so the
+  first packet's time no longer says where the sound starts. framelift now uses the
+  audio stream's start time, which accounts for that, and the audio is in sync again with
+  FFmpeg 6, 8 and 9 alike (checked with each). FFmpeg 8 and older weren't affected.
+- A test of the resume hint failed depending on the pytest version and on which tests
+  ran before it; it now reads the message wherever it was printed.
+
 ## [1.4.1] — 2026-10-16
 
 ### Changed

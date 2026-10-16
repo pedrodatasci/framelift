@@ -91,12 +91,14 @@ def test_resuming_into_the_finished_part_is_refused(tmp_path):
     assert done.read_bytes() == b"hours of work"
 
 
-def test_the_resume_hint_names_the_next_part_and_the_join(caplog):
+def test_the_resume_hint_names_the_next_part_and_the_join(caplog, capsys):
     caplog.set_level(logging.INFO, logger="framelift.cli")
     result = EnhanceResult(output_path=Path("concert_hd.mp4"), first_frame=1, last_frame=10480,
                            frames_processed=10480, frames_written=10480, total_frames=20000,
                            interrupted=True)  # fmt: skip
     _report(result)
-    text = caplog.text
+    # Where the messages land depends on whether an earlier test set up the console.
+    captured = capsys.readouterr()
+    text = caplog.text + captured.out + captured.err
     assert "-o concert_hd_part2.mp4 --start-frame 10481" in text
     assert "framelift join concert_hd.mp4 concert_hd_part2.mp4 -o concert_hd_full.mp4" in text

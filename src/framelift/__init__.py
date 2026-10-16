@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 from .analysis import AIEffect, estimate_noise, softness, suggest_ai_strength, suggest_size
 from .console import setup_console
