@@ -4,7 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [1.8.0] — 2026-10-15
+## [1.0.0] — 2026-10-15
+
+The first stable release: the same features as 0.9.0, now considered complete for the
+command line. From here on the version number follows
+[Semantic Versioning](https://semver.org/) strictly: flags, defaults and the Python API
+only change in a backwards-incompatible way with a new major version.
+
+### Changed
+
+- Version numbers. The development versions were first numbered 1.0.0 to 1.8.0; below
+  they're 0.1.0 to 0.9.0 (in the same order). Commit messages before this release still
+  use the old numbers: "(1.3.0)" there is 0.4.0 here, and so on.
+- The package is marked as stable (Development Status 5 - Production/Stable).
+
+## [0.9.0] — 2026-10-15
 
 ### Added
 
@@ -27,11 +41,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Compatibility
 
-- Every flag, default and API from 1.7 still works the same. With the AI on, the output
+- Every flag, default and API from 0.8 still works the same. With the AI on, the output
   is exactly the same as before. With `--interpolate`, frames between two identical
   frames are now repeats instead of being drawn by RIFE.
 
-## [1.7.0] — 2026-10-15
+## [0.8.0] — 2026-10-15
 
 ### Added
 
@@ -58,10 +72,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Compatibility
 
-- Every flag, default and API from 1.6 still works the same. Without `--interpolate`,
+- Every flag, default and API from 0.7 still works the same. Without `--interpolate`,
   the output is unchanged.
 
-## [1.6.0] — 2026-10-15
+## [0.7.0] — 2026-10-15
 
 ### Added
 
@@ -90,10 +104,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Compatibility
 
-- Every flag, default and API from 1.5 still works the same. With the AI on, the output is
+- Every flag, default and API from 0.6 still works the same. With the AI on, the output is
   unchanged on PyTorch, and within 1 level out of 255 on OpenVINO, as before.
 
-## [1.5.0] — 2026-10-10
+## [0.6.0] — 2026-10-10
 
 ### Added
 
@@ -136,14 +150,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Compatibility
 
-- Every flag, default and API from 1.4 still works the same, and with the defaults the
-  output is bit-for-bit identical to 1.4, with 1 worker or 2.
+- Every flag, default and API from 0.5 still works the same, and with the defaults the
+  output is bit-for-bit identical to 0.5, with 1 worker or 2.
 - `--backend openvino` and `--device igpu` round a few values differently from PyTorch (at
   most 1 level out of 255 on CPU; FP16 on the Intel GPU, like `--half` on NVIDIA).
 - OpenVINO caches compiled models in `<weights dir>/openvino_cache/` (already ignored by
   git, with the rest of `weights/`).
 
-## [1.4.0] — 2026-10-10
+## [0.5.0] — 2026-10-10
 
 ### Added
 
@@ -194,12 +208,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Compatibility
 
-- Every flag, default and API from 1.3 still works the same.
+- Every flag, default and API from 0.4 still works the same.
 - On **CPU with the default model**, the output is no longer bit-identical to the
   original script: the new memory layout rounds differently in about 0.002% of the
   values, by at most 1 level out of 255. GPU runs and the other models are unaffected.
 
-## [1.3.0] — 2026-09-29
+## [0.4.0] — 2026-09-29
 
 ### Added
 
@@ -222,7 +236,7 @@ All notable changes to this project are documented here. The format follows
 - By default the output now has audio. The video stream is still bit-identical to the
   original script's; `--no-audio` gives the old silent MP4.
 
-## [1.2.0] — 2026-09-29
+## [0.3.0] — 2026-09-29
 
 ### Added
 
@@ -258,7 +272,7 @@ All notable changes to this project are documented here. The format follows
 
 - `framelift -i … -o …` still produces output bit-identical to the original script.
 
-## [1.1.0] — 2026-09-28
+## [0.2.0] — 2026-09-28
 
 ### Added
 
@@ -286,7 +300,7 @@ All notable changes to this project are documented here. The format follows
 - `framelift -i … -o …` and `python main.py …` behave exactly as before; enhanced output
   is still bit-identical to the original script.
 
-## [1.0.0] — 2026-09-26
+## [0.1.0] — 2026-09-26
 
 First release as a library. It is a restructuring of the original single-file
 `main.py` script.

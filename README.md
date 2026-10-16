@@ -580,7 +580,7 @@ machine. Otherwise, rough guidance:
   8.3 to 5.8 s. The heavier models were *slower* that way, so they're unchanged.
 - **`--scale` barely affects speed.** The models always upscale 4x internally and resize to
   your scale at the end, so 1080p output costs about the same AI time as 720p.
-- **The AI and the rest overlap.** Since 1.5 the AI runs in its own thread: while it
+- **The AI and the rest overlap.** The AI runs in its own thread: while it
   works on the next frame, the previous one is resized, blended and encoded. That only
   helps with cores to spare; on a single core it's a draw (the same 55–56 s for 12 frames
   in our tests). The output is bit-for-bit the same as before.
@@ -918,7 +918,7 @@ Nothing breaks: every flag kept its name and default, and `python main.py …` s
 works. The video was verified frame by frame (MD5 of every decoded frame) against the
 original script across profiles, scales, frame-rate conversion, resume and tiling
 settings. Two things differ in the output. It now keeps the audio (add `--no-audio` for
-the old silent MP4). And since 1.4, on CPU, the default model runs about 30% faster in a
+the old silent MP4). And on CPU, the default model runs about 30% faster in a
 different memory layout, which rounds a handful of values differently: at most 1 level
 out of 255, in about 0.002% of them, invisible but no longer bit-identical. GPU runs and
 the other models are unaffected.

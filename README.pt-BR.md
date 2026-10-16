@@ -587,7 +587,7 @@ na sua máquina. Fora isso, um guia aproximado:
 - **O `--scale` quase não muda a velocidade.** Os modelos sempre ampliam 4x internamente e
   só redimensionam para a sua escala no fim, então gerar 1080p custa praticamente o mesmo
   tempo de IA que 720p.
-- **A IA e o resto se sobrepõem.** Desde a 1.5 a IA roda na própria thread: enquanto ela
+- **A IA e o resto se sobrepõem.** A IA roda na própria thread: enquanto ela
   trabalha no próximo frame, o anterior é redimensionado, misturado e codificado. Isso só
   ajuda quando sobram núcleos; num único núcleo dá empate (os mesmos 55–56 s para 12 frames
   nos nossos testes). A saída é idêntica bit a bit à de antes.
@@ -928,7 +928,7 @@ Nada quebra: toda flag manteve nome e valor padrão, e `python main.py …` cont
 funcionando. O vídeo foi verificado frame a frame (MD5 de cada frame decodificado) contra
 o script original, com vários perfis, escalas, conversão de frame rate, retomada e
 configurações de tile. Duas coisas diferem na saída. Agora ela mantém o áudio (use
-`--no-audio` para ter o MP4 sem som de antes). E, desde a 1.4, na CPU, o modelo padrão roda
+`--no-audio` para ter o MP4 sem som de antes). E, na CPU, o modelo padrão roda
 cerca de 30% mais rápido num formato de memória diferente, o que arredonda alguns valores de
 outro jeito: no máximo 1 nível em 255, em cerca de 0,002% deles. É invisível, mas não é mais
 idêntico bit a bit. Execuções na GPU e os outros modelos não mudam.
