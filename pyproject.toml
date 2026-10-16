@@ -1,26 +1,36 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "framelift"
 dynamic = ["version"]
-description = "Upscale and restore videos with Real-ESRGAN — GPU when you have one, CPU when you don't."
+description = "Upscale, restore and smooth videos with Real-ESRGAN and RIFE, on an NVIDIA or Intel GPU or just the CPU."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE", "LICENSE-BasicSR.txt"]
 requires-python = ">=3.9"
 authors = [{ name = "Pedro Sofiati de Sá" }]
-keywords = ["video", "upscaling", "super-resolution", "real-esrgan", "restoration", "ffmpeg"]
+keywords = [
+    "video", "upscaling", "super-resolution", "real-esrgan", "restoration",
+    "frame-interpolation", "rife", "openvino", "ffmpeg",
+]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Environment :: GPU :: NVIDIA CUDA",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Video",
     "Topic :: Scientific/Engineering :: Image Processing",
+    "Typing :: Typed",
 ]
 dependencies = [
     "numpy>=1.24",
@@ -42,6 +52,9 @@ framelift = "framelift.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/pedrodatasci/framelift"
+Documentation = "https://github.com/pedrodatasci/framelift#readme"
+"Documentação (pt-BR)" = "https://github.com/pedrodatasci/framelift/blob/main/README.pt-BR.md"
+Changelog = "https://github.com/pedrodatasci/framelift/blob/main/CHANGELOG.md"
 Issues = "https://github.com/pedrodatasci/framelift/issues"
 
 [tool.setuptools.dynamic]
@@ -49,6 +62,9 @@ version = { attr = "framelift.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+framelift = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

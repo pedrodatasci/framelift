@@ -160,9 +160,9 @@ instalar:
 Se o FFmpeg estiver numa pasta fora do `PATH`, defina a variável de ambiente
 `FRAMELIFT_FFMPEG` com essa pasta (a que tem o `ffmpeg` e o `ffprobe`).
 
+O ideal é instalar o framelift num ambiente virtual só dele:
+
 ```bash
-git clone https://github.com/pedrodatasci/framelift.git
-cd framelift
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 ```
@@ -174,14 +174,13 @@ Em máquinas só com CPU, pule este passo.
 Depois instale o framelift:
 
 ```bash
-pip install -r requirements.txt    # opcional: as versões exatas já testadas
-pip install -e .
+pip install framelift
 framelift --version
 ```
 
 Isso cria o comando `framelift`. `python -m framelift` também funciona.
 
-**Opcional, para hardware Intel:** `pip install -e ".[intel]"` instala o
+**Opcional, para hardware Intel:** `pip install "framelift[intel]"` instala o
 [OpenVINO](https://docs.openvino.ai), que permite rodar a IA numa GPU Intel (Iris, UHD,
 Arc) com `--device igpu`, ou na CPU com `--backend openvino` (muitas vezes mais rápido que o
 PyTorch, em qualquer CPU x86). Com ele instalado, o `framelift tune` testa as duas opções.
@@ -191,11 +190,21 @@ instale o [VLC media player](https://www.videolan.org/vlc/) (64 bits se o seu Py
 64 bits) e a biblioteca Python dele:
 
 ```bash
-pip install -e ".[picker]"         # instala o python-vlc
+pip install "framelift[picker]"     # instala o python-vlc
 ```
 
 No Linux, o Tkinter também pode precisar de `sudo apt install python3-tk`. Todo o resto
 funciona sem eles.
+
+**A partir do código-fonte**, para testar o que ainda não foi lançado ou para trabalhar no
+próprio framelift:
+
+```bash
+git clone https://github.com/pedrodatasci/framelift.git
+cd framelift
+pip install -r requirements.txt    # opcional: as versões exatas já testadas
+pip install -e ".[dev]"
+```
 
 ## Primeiros passos
 
@@ -441,7 +450,8 @@ Códigos de saída: `0` salvo, `1` erro ou janela fechada sem escolher, `130`
 | Só deixar mais fluido (sem IA) | `framelift -i in.mp4 -o out.mp4 --no-ai --same-resolution --interpolate` |
 | GPU NVIDIA a toda velocidade | `framelift -i in.mp4 -o out.mp4 --device cuda --half --tile 768 --encoder nvenc` |
 | Notebook Intel (CPU) | `framelift -i in.mp4 -o out.mp4 --device cpu --tile 128 --torch-threads 8` |
-| Retomar depois do frame 1200 | `framelift -i in.mp4 -o parte2.mp4 --start-frame 1201` |
+| Retomar depois do frame 1200 | `framelift -i in.mp4 -o out_part2.mp4 --start-frame 1201` |
+| Juntar as partes | `framelift join out.mp4 out_part2.mp4 -o out_full.mp4` |
 | Só um trecho do vídeo | `framelift -i in.mp4 -o trecho.mp4 --pick-range` |
 
 ## Referência da linha de comando
@@ -621,12 +631,13 @@ na sua máquina. Fora isso, um guia aproximado:
 ## Parar, retomar e juntar partes
 
 Aperte <kbd>Ctrl</kbd>+<kbd>C</kbd> **uma vez**: o framelift termina o frame em andamento,
-fecha o MP4 direitinho e mostra algo como:
+fecha o MP4 direitinho e diz exatamente como continuar:
 
 ```
 Saved a partial video /videos/out.mp4
   frames 1 → 1200 (1200 enhanced, 1200 written) in 42m10s
-To continue from here, run again with:  --start-frame 1201
+To continue from here, run the same command with:  -o out_part2.mp4 --start-frame 1201
+When it's done, join the parts:  framelift join out.mp4 out_part2.mp4 -o out_full.mp4
 ```
 
 Aperte **duas vezes** para sair na hora (código 130). O FFmpeg ainda consegue fechar o
@@ -635,16 +646,25 @@ arquivo dele, que fica como `out.encoding_tmp.mp4`.
 Para continuar, rode o mesmo comando com um **novo nome de saída** e o frame sugerido:
 
 ```bash
-framelift -i in.mp4 -o parte2.mp4 --start-frame 1201
+framelift -i in.mp4 -o out_part2.mp4 --start-frame 1201
 ```
 
-Depois junte as partes sem perda de qualidade com o FFmpeg (cada parte leva o próprio
-trecho de áudio, então o arquivo final continua sincronizado):
+Uma execução nunca acrescenta frames a um arquivo existente: ela grava o seu próprio.
+Por isso o framelift se recusa a retomar no arquivo da parte já pronta (`--start-frame`
+maior que 1 com um `-o` que já existe), porque isso trocaria horas de trabalho pela parte
+nova.
+
+Quando todas as partes estiverem prontas, junte-as:
 
 ```bash
-printf "file 'out.mp4'\nfile 'parte2.mp4'\n" > partes.txt
-ffmpeg -f concat -safe 0 -i partes.txt -c copy completo.mp4
+framelift join out.mp4 out_part2.mp4 -o out_full.mp4
 ```
+
+As partes são juntadas na ordem dada, sem recodificar: leva segundos e não perde nada.
+Cada parte leva o próprio trecho do áudio original, cortado no frame exato, então o vídeo
+final continua sincronizado. Antes, o framelift confere se as partes foram feitas do mesmo
+jeito (tamanho, frame rate, codificador, áudio) e diz o que difere, se não foram. Pelo
+Python: `framelift.join_videos(["out.mp4", "out_part2.mp4"], "out_full.mp4")`.
 
 > [!TIP]
 > `--start-frame` junto com `--max-frames` permite dividir de propósito um trabalho longo
@@ -709,9 +729,11 @@ enquanto o MP4 é finalizado:
 ```python
 from framelift import enhance_video
 
+
 def on_progress(p):
     eta = f", faltam {p.eta_seconds:.0f} s" if p.eta_seconds is not None else ""
     print(f"{p.stage}: {p.frames_done}/{p.frames_total} ({p.fraction:.0%}){eta}")
+
 
 enhance_video("in.mp4", "out.mp4", show_progress=False, on_progress=on_progress)
 ```
@@ -912,6 +934,8 @@ framelift/
 │   ├── analysis.py    # medidas de ruído, suavidade, movimento e efeito da IA; folha
 │   ├── tune_cli.py    # o subcomando `framelift tune`
 │   ├── trim.py        # FrameRange / trim_video: cortes no frame exato, sem perdas
+│   ├── join.py        # framelift join: partes de uma execução retomada num vídeo só
+│   ├── join_cli.py    # o subcomando `framelift join`
 │   ├── trim_cli.py    # o subcomando `framelift trim` e o --pick-range
 │   ├── picker.py      # pick_range: a janela do player com linha do tempo (Tk + VLC)
 │   ├── planning.py    # RunPlan / EnhanceResult: tamanhos, intervalos, frame rates

@@ -8,7 +8,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[Português 🇧🇷](README.pt-BR.md) · [🎬 More examples](GALLERY.md)
+[Português 🇧🇷](https://github.com/pedrodatasci/framelift/blob/main/README.pt-BR.md) · [🎬 More examples](https://github.com/pedrodatasci/framelift/blob/main/GALLERY.md)
 
 </div>
 
@@ -29,30 +29,30 @@ side: the original on the left (just stretched to the same size), framelift on t
 
 **Color music video:** cleaner strings and frets, less compression blockiness.
 
-![Before and after: color music video, zoomed in](docs/music_video_zoom.gif)
+![Before and after: color music video, zoomed in](https://raw.githubusercontent.com/pedrodatasci/framelift/main/docs/music_video_zoom.gif)
 
 <details>
 <summary>Full frame</summary>
 
-![Before and after: color music video, full frame](docs/music_video_full.gif)
+![Before and after: color music video, full frame](https://raw.githubusercontent.com/pedrodatasci/framelift/main/docs/music_video_full.gif)
 
 </details>
 
 **Black-and-white concert footage:** grain and blocky artifacts cleaned up, crisper edges.
 Enhanced on a laptop CPU.
 
-![Before and after: black-and-white concert footage, zoomed in](docs/demo_zoom.gif)
+![Before and after: black-and-white concert footage, zoomed in](https://raw.githubusercontent.com/pedrodatasci/framelift/main/docs/demo_zoom.gif)
 
 <details>
 <summary>Full frame</summary>
 
-![Before and after: black-and-white concert footage, full frame](docs/demo_full.gif)
+![Before and after: black-and-white concert footage, full frame](https://raw.githubusercontent.com/pedrodatasci/framelift/main/docs/demo_full.gif)
 
 </details>
 
 <sub>GIFs are compressed and scaled down for this page; the real MP4 output is sharper.</sub>
 
-**[🎬 More examples in the gallery →](GALLERY.md)**
+**[🎬 More examples in the gallery →](https://github.com/pedrodatasci/framelift/blob/main/GALLERY.md)**
 
 ## Highlights
 
@@ -85,7 +85,7 @@ Enhanced on a laptop CPU.
 
 ## Contents
 
-- [Before / after](#before--after) (and [more examples](GALLERY.md))
+- [Before / after](#before--after) (and [more examples](https://github.com/pedrodatasci/framelift/blob/main/GALLERY.md))
 - [How it works](#how-it-works)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -157,9 +157,9 @@ on your `PATH` (`ffmpeg -version` should work in a terminal). The quickest way t
 If FFmpeg is somewhere that isn't on the `PATH`, set the `FRAMELIFT_FFMPEG` environment
 variable to its folder (the one with `ffmpeg` and `ffprobe`).
 
+It's best to install framelift in its own virtual environment:
+
 ```bash
-git clone https://github.com/pedrodatasci/framelift.git
-cd framelift
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 ```
@@ -171,14 +171,13 @@ Skip this step for CPU-only machines.
 Then install framelift:
 
 ```bash
-pip install -r requirements.txt    # optional: the exact, known-good versions
-pip install -e .
+pip install framelift
 framelift --version
 ```
 
 This gives you the `framelift` command. `python -m framelift` works too.
 
-**Optional, for Intel hardware:** `pip install -e ".[intel]"` installs
+**Optional, for Intel hardware:** `pip install "framelift[intel]"` installs
 [OpenVINO](https://docs.openvino.ai), which lets framelift run the AI on an Intel GPU (Iris,
 UHD, Arc) with `--device igpu`, or on the CPU with `--backend openvino` (often faster than
 PyTorch, on any x86 CPU). `framelift tune` tries both when it's installed.
@@ -188,11 +187,21 @@ install [VLC media player](https://www.videolan.org/vlc/) (64-bit if your Python
 64-bit) and its Python binding:
 
 ```bash
-pip install -e ".[picker]"         # installs python-vlc
+pip install "framelift[picker]"     # installs python-vlc
 ```
 
 On Linux, Tkinter may also need `sudo apt install python3-tk`. Everything else works
 without them.
+
+**From the source code**, to try what's coming before it's released or to work on
+framelift itself:
+
+```bash
+git clone https://github.com/pedrodatasci/framelift.git
+cd framelift
+pip install -r requirements.txt    # optional: the exact, known-good versions
+pip install -e ".[dev]"
+```
 
 ## Quick start
 
@@ -265,7 +274,7 @@ It takes a minute or two (longer on a slow CPU with big videos) and works in six
 Here's the real sheet for the color music video above. The bottom row is the `best` preset:
 notice the sharper studs on the strap. Click it to see it at full size.
 
-![Comparison sheet made by framelift tune](docs/tune_sheet.jpg)
+![Comparison sheet made by framelift tune](https://raw.githubusercontent.com/pedrodatasci/framelift/main/docs/tune_sheet.jpg)
 
 And a report from a real run on another 720x480 clip, on a single-core test machine with
 OpenVINO installed (so the times are long, and there was no worker test):
@@ -434,7 +443,8 @@ Exit codes: `0` saved, `1` error or the window was closed without choosing, `130
 | Only smoother motion (no AI) | `framelift -i in.mp4 -o out.mp4 --no-ai --same-resolution --interpolate` |
 | NVIDIA GPU, full speed | `framelift -i in.mp4 -o out.mp4 --device cuda --half --tile 768 --encoder nvenc` |
 | Intel laptop (CPU) | `framelift -i in.mp4 -o out.mp4 --device cpu --tile 128 --torch-threads 8` |
-| Resume after frame 1200 | `framelift -i in.mp4 -o part2.mp4 --start-frame 1201` |
+| Resume after frame 1200 | `framelift -i in.mp4 -o out_part2.mp4 --start-frame 1201` |
+| Join the parts | `framelift join out.mp4 out_part2.mp4 -o out_full.mp4` |
 | Only one part of the video | `framelift -i in.mp4 -o part.mp4 --pick-range` |
 
 ## Command-line reference
@@ -611,12 +621,13 @@ machine. Otherwise, rough guidance:
 ## Stopping, resuming and joining parts
 
 Press <kbd>Ctrl</kbd>+<kbd>C</kbd> **once**: framelift finishes the frame it's working on,
-closes the MP4 properly and prints something like:
+closes the MP4 properly and tells you exactly how to go on:
 
 ```
 Saved a partial video /videos/out.mp4
   frames 1 → 1200 (1200 enhanced, 1200 written) in 42m10s
-To continue from here, run again with:  --start-frame 1201
+To continue from here, run the same command with:  -o out_part2.mp4 --start-frame 1201
+When it's done, join the parts:  framelift join out.mp4 out_part2.mp4 -o out_full.mp4
 ```
 
 Press it **twice** to quit immediately (exit code 130). FFmpeg is still allowed to close
@@ -625,16 +636,24 @@ its file, which is left as `out.encoding_tmp.mp4`.
 To continue, run the same command with a **new output name** and the suggested start:
 
 ```bash
-framelift -i in.mp4 -o part2.mp4 --start-frame 1201
+framelift -i in.mp4 -o out_part2.mp4 --start-frame 1201
 ```
 
-Then join the parts losslessly with FFmpeg (each part carries its own stretch of audio,
-so the joined file stays in sync):
+A run never adds to an existing file: it writes its own. So framelift refuses to resume
+into the file of the part already done (`--start-frame` above 1 with an `-o` that
+exists), since that would replace hours of work with the new part.
+
+When all the parts are done, put them together:
 
 ```bash
-printf "file 'out.mp4'\nfile 'part2.mp4'\n" > parts.txt
-ffmpeg -f concat -safe 0 -i parts.txt -c copy joined.mp4
+framelift join out.mp4 out_part2.mp4 -o out_full.mp4
 ```
+
+The parts are joined in the order given, without re-encoding: it takes seconds and loses
+nothing. Each part carries its own stretch of the original audio, cut on the exact frame,
+so the joined video stays in sync. framelift first checks that the parts were made the
+same way (size, frame rate, encoder, audio) and says what differs if they weren't. From
+Python: `framelift.join_videos(["out.mp4", "out_part2.mp4"], "out_full.mp4")`.
 
 > [!TIP]
 > `--start-frame` together with `--max-frames` lets you split a long job into sessions
@@ -696,9 +715,11 @@ pass `on_progress`. It receives a `Progress` before the first frame, as frames a
 ```python
 from framelift import enhance_video
 
+
 def on_progress(p):
     eta = f", {p.eta_seconds:.0f} s left" if p.eta_seconds is not None else ""
     print(f"{p.stage}: {p.frames_done}/{p.frames_total} ({p.fraction:.0%}){eta}")
+
 
 enhance_video("in.mp4", "out.mp4", show_progress=False, on_progress=on_progress)
 ```
@@ -840,7 +861,7 @@ blur = softness(cleaned)  # ~0.15 = sharp, 0.5+ = soft
 suggest_size(640, 360).scale  # 3.0 (360p → 1080p)
 ```
 
-More in [`examples/`](examples/).
+More in [`examples/`](https://github.com/pedrodatasci/framelift/tree/main/examples/).
 
 ## Troubleshooting
 
@@ -900,6 +921,8 @@ framelift/
 │   ├── analysis.py    # noise, softness, motion and AI-effect measurements; sheet
 │   ├── tune_cli.py    # the `framelift tune` subcommand
 │   ├── trim.py        # FrameRange / trim_video: frame-exact, lossless cuts
+│   ├── join.py        # framelift join: parts of a resumed run into one video
+│   ├── join_cli.py    # the `framelift join` subcommand
 │   ├── trim_cli.py    # the `framelift trim` subcommand and --pick-range
 │   ├── picker.py      # pick_range: the player window with a timeline (Tk + VLC)
 │   ├── planning.py    # RunPlan / EnhanceResult: sizes, ranges, frame rates
@@ -948,7 +971,7 @@ out of 255, in about 0.002% of them, invisible but no longer bit-identical. GPU 
 the other models are unaffected.
 
 What changed — including a few bug fixes — is listed in the
-[CHANGELOG](CHANGELOG.md).
+[CHANGELOG](https://github.com/pedrodatasci/framelift/blob/main/CHANGELOG.md).
 
 ## Credits and license
 
@@ -961,8 +984,8 @@ What changed — including a few bug fixes — is listed in the
   [vs-rife](https://github.com/HolyWu/vs-rife) (MIT).
 - [BasicSR](https://github.com/XPixelGroup/BasicSR) (Apache-2.0): framelift includes its
   definitions of the Real-ESRGAN networks, in `src/framelift/archs.py`, under
-  [its license](LICENSE-BasicSR.txt).
+  [its license](https://github.com/pedrodatasci/framelift/blob/main/LICENSE-BasicSR.txt).
 - [PyTorch](https://pytorch.org), [OpenCV](https://opencv.org) and
   [FFmpeg](https://ffmpeg.org).
 
-framelift itself is released under the [MIT License](LICENSE).
+framelift itself is released under the [MIT License](https://github.com/pedrodatasci/framelift/blob/main/LICENSE).

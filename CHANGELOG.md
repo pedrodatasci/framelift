@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-10-16
+
+framelift is ready for PyPI: `pip install framelift`.
+
+### Added
+
+- **Publishing workflow** (`.github/workflows/publish.yml`). Pushing a version tag builds
+  framelift, checks that the tag matches the version in the code, and publishes it on
+  PyPI through trusted publishing (no stored password or token). Running it by hand
+  publishes the same build on TestPyPI, as a dry run.
+- **Type information for editors and type checkers** (`py.typed`): code that uses
+  framelift's API gets its type hints.
+- Windows and Python 3.13 in the automatic tests.
+- **`framelift join`** puts the parts of a stopped and resumed run back together:
+  `framelift join out.mp4 out_part2.mp4 -o out_full.mp4`. No re-encoding (seconds, no
+  quality lost), each part with its own stretch of the audio, so it stays in sync. It
+  first checks that the parts were made the same way (size, frame rate, encoder, audio)
+  and says what differs. From Python: `framelift.join_videos(parts, output)`.
+
+### Fixed
+
+- **Resuming could replace the part already done.** A run writes its own file, it never
+  adds to an existing one, and the hint printed when a run stops only said
+  `--start-frame N`: following it with the same `-o` replaced the first part with the
+  second. Now the hint gives a new output name and the join command to run after
+  (`-o out_part2.mp4 --start-frame 1201`, then `framelift join …`), and framelift refuses
+  to start when `--start-frame` is above 1 and the output already exists.
+
+### Changed
+
+- **Installation instructions:** `pip install framelift`, with the extras as
+  `pip install "framelift[intel]"` and `pip install "framelift[picker]"`; installing from
+  the source code is described for working on framelift itself.
+- The README's links and images are absolute, so they also work on framelift's PyPI page.
+- Package metadata: a description that mentions RIFE, more keywords, the supported Python
+  versions, links to the changelog and the Portuguese README, and the license declared the
+  current way (`license = "MIT"`, with `LICENSE-BasicSR.txt` included). Building now needs
+  setuptools 77 or newer, which pip fetches by itself.
+
+### Compatibility
+
+- Every flag, default, API and output from 1.3 is unchanged, except that a resumed run
+  (`--start-frame` above 1) no longer starts if its output file already exists.
+
 ## [1.3.0] — 2026-10-15
 
 ### Added

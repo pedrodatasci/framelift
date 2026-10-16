@@ -12,6 +12,7 @@ import signal
 import sys
 import threading
 from collections.abc import Sequence
+from pathlib import Path
 
 from . import __version__
 from .console import setup_console
@@ -40,8 +41,9 @@ examples:
   framelift -i in.mp4 -o smooth.mp4 --output-fps 60 --interpolate
   framelift -i in.mp4 -o smooth.mp4 --no-ai --same-resolution --interpolate
 
-  # Resume a run that stopped after frame 1200
-  framelift -i in.mp4 -o part2.mp4 --start-frame 1201
+  # Resume a run that stopped after frame 1200 (into a new file), then join the parts
+  framelift -i in.mp4 -o out_part2.mp4 --start-frame 1201
+  framelift join out.mp4 out_part2.mp4 -o out_full.mp4
 
   # Choose the part to enhance on a timeline first (needs VLC)
   framelift -i concert.mp4 -o concert_hd.mp4 --pick-range
@@ -395,6 +397,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .trim_cli import main as trim_main
 
         return trim_main(argv[1:])
+    if argv[:1] == ["join"]:
+        from .join_cli import main as join_main
+
+        return join_main(argv[1:])
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -411,6 +417,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--input and --output are required (try --help for examples).")
 
     setup_console(args.verbose - args.quiet)
+
+    # Resuming into the file of the part already done would replace it with this part.
+    if args.start_frame > 1 and Path(args.output).exists():
+        from .join import next_part_path
+
+        log.error(
+            "%s already exists, and --start-frame %d continues a stopped run: writing here "
+            "would replace the part already done. Write this part to a new file, e.g. "
+            "-o %s, then put them together with framelift join. (To replace %s anyway, "
+            "delete it first.)",
+            args.output, args.start_frame, _shown(next_part_path(args.output)), args.output,
+        )  # fmt: skip
+        return 1
 
     if args.pick_range:
         from .trim_cli import pick_and_trim
@@ -444,11 +463,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.error("Run again with -v to see the full traceback.")
         return 1
 
-    _report(result, args.input if args.pick_range else None, ai=options.uses_ai)
+    _report(result, args.input if args.pick_range else None, ai=options.uses_ai,
+            output=args.output)  # fmt: skip
     return 0
 
 
-def _report(result, cut_input: str | None = None, *, ai: bool = True) -> None:
+def _report(
+    result, cut_input: str | None = None, *, ai: bool = True, output: str | None = None
+) -> None:
     minutes, seconds = divmod(int(result.elapsed_seconds), 60)
     status = "Saved a partial video" if result.interrupted else "Done!"
 
@@ -469,17 +491,33 @@ def _report(result, cut_input: str | None = None, *, ai: bool = True) -> None:
         log.info("  with the original audio%s", " (as AAC)" if result.audio == "converted" else "")
 
     if result.resume_from is not None:
+        from .join import all_parts, joined_path, next_part_path
+
+        # Named as the user wrote -o, so the hint can be pasted as is.
+        following = next_part_path(output or result.output_path)
         if cut_input is not None:
             # The cut is the input now: resume on it (without --pick-range).
-            shown = f'"{cut_input}"' if " " in cut_input else cut_input
             log.info(
-                "To continue from here, run again with:  -i %s --start-frame %d "
-                "(and a new -o, without --pick-range)",
-                shown,
-                result.resume_from,
-            )
+                "To continue from here, run the same command with:  -i %s -o %s "
+                "--start-frame %d  (without --pick-range)",
+                _shown(cut_input), _shown(following), result.resume_from,
+            )  # fmt: skip
         else:
-            log.info("To continue from here, run again with:  --start-frame %d", result.resume_from)
+            log.info(
+                "To continue from here, run the same command with:  -o %s --start-frame %d",
+                _shown(following), result.resume_from,
+            )  # fmt: skip
+        parts = " ".join(_shown(part) for part in all_parts(following))
+        log.info(
+            "When it's done, join the parts:  framelift join %s -o %s",
+            parts, _shown(joined_path(following)),
+        )  # fmt: skip
+
+
+def _shown(path) -> str:
+    """A path ready to paste into a command (quoted if it has spaces)."""
+    text = str(path)
+    return f'"{text}"' if " " in text else text
 
 
 def _print_catalog(title: str, entries: dict, default: str) -> None:

@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from framelift.audio import add_audio, probe_audio
+from framelift.join import join_videos
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg not installed")
 
@@ -141,10 +142,7 @@ def test_parts_can_be_joined_without_losing_sync(source, tmp_path):
     add_audio(first, source, 0.0, 1.5)
     add_audio(second, source, 1.5, 1.5)
 
-    parts = tmp_path / "parts.txt"
-    # FFmpeg reads the list as UTF-8, whatever the system's encoding (paths like "Pedro Sá").
-    parts.write_text(f"file '{first.as_posix()}'\nfile '{second.as_posix()}'\n", encoding="utf-8")
-    joined = tmp_path / "joined.mp4"
-    _ffmpeg("-f", "concat", "-safe", "0", "-i", str(parts), "-c", "copy", str(joined))
+    # framelift join uses FFmpeg's concat, without re-encoding.
+    joined = join_videos([first, second], tmp_path / "joined.mp4").path
 
     assert _beep_time(joined)[0] == pytest.approx(BEEP_AT, abs=0.005)
