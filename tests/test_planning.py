@@ -94,3 +94,11 @@ def test_a_rounded_multiple_is_made_exact_for_interpolation():
     assert plan_run(video, typed).output_fps == 60000 / 1001
     # Without --interpolate the rate is used as given (frame repeating doesn't drift).
     assert plan_run(video, EnhanceOptions(output_fps=59.94)).output_fps == 59.94
+
+
+def test_progress_fraction():
+    from framelift.planning import Progress
+
+    assert Progress("frames", 5, 20, 5, 1.0).fraction == 0.25
+    assert Progress("loading", 0, 0, 0, 0.0).fraction == 0.0
+    assert Progress("frames", 21, 20, 21, 1.0).fraction == 1.0

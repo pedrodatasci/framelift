@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-10-15
+
+### Added
+
+- **`on_progress` callback** in `enhance_video` and `VideoEnhancer.enhance`, to follow a
+  run from code: progress bars in apps (the base for a graphical version), logs,
+  notifications. It receives a `Progress` record with the `stage` (`"loading"`,
+  `"frames"`, `"finishing"`), `frames_done`, `frames_total`, `frames_written`,
+  `elapsed_seconds`, `eta_seconds` and `fraction`.
+  - Called before the first frame, after the first and the last frame, at most 10 times
+    a second in between, and once while finishing, in the thread that called
+    `enhance`.
+  - Set `stop_event` from it to stop early and keep what's done; an exception raised in
+    it stops the run like any other error.
+- `Progress` is exported from `framelift`.
+
+### Compatibility
+
+- Every flag, default, API and output from 1.1 is unchanged. The terminal progress bar
+  works as before (`show_progress`).
+
 ## [1.1.0] — 2026-10-15
 
 The first step towards publishing framelift on PyPI: it now installs with plain pip,

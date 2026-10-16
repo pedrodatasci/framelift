@@ -680,6 +680,24 @@ result = enhance_video("in.mp4", "smooth.mp4", output_fps=60, interpolate=True)
 print(result.frames_interpolated, "new frames drawn by RIFE")
 ```
 
+To follow a run from your own code (a progress bar in an app, a log line, a message),
+pass `on_progress`. It receives a `Progress` before the first frame, as frames are done
+(at most 10 times a second), and while the MP4 is being finished:
+
+```python
+from framelift import enhance_video
+
+def on_progress(p):
+    eta = f", {p.eta_seconds:.0f} s left" if p.eta_seconds is not None else ""
+    print(f"{p.stage}: {p.frames_done}/{p.frames_total} ({p.fraction:.0%}){eta}")
+
+enhance_video("in.mp4", "out.mp4", show_progress=False, on_progress=on_progress)
+```
+
+The callback runs in the thread that called `enhance_video`, so keep it quick. To stop
+early from it (or from anywhere), set the `stop_event` you passed in; what's done so far
+is saved as a valid MP4.
+
 ### Reusable settings and batch processing
 
 `VideoEnhancer` loads the model once and reuses it for every video:

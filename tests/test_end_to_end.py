@@ -325,3 +325,47 @@ def _decoded(path):
         if not ok:
             return frames
         frames.append(image)
+
+
+def test_on_progress_reports_every_stage(make_video, tmp_path):
+    events = []
+    clip = make_video(frames=30)
+    result = enhance_video(clip, tmp_path / "p.mp4", ai=False, output_fps=48, audio=False,
+                           show_progress=False, on_progress=events.append)  # fmt: skip
+
+    stages = [e.stage for e in events]
+    assert stages[0] == "loading" and stages[-1] == "finishing"
+    assert set(stages[1:-1]) == {"frames"}
+    done = [e.frames_done for e in events]
+    assert done == sorted(done) and events[-2].frames_done == 30
+    last = events[-2]
+    assert (last.frames_total, last.frames_written, last.fraction) == (30, 60, 1.0)
+    assert last.eta_seconds == 0 and result.frames_written == 60
+    assert all(e.elapsed_seconds >= 0 for e in events)
+
+
+def test_on_progress_can_stop_the_run(make_video, tmp_path):
+    import threading
+
+    stop = threading.Event()
+
+    def on_progress(progress):
+        if progress.frames_done >= 1:  # the first frame is always reported
+            stop.set()
+
+    result = enhance_video(make_video(frames=30), tmp_path / "s.mp4", ai=False, audio=False,
+                           show_progress=False, stop_event=stop,
+                           on_progress=on_progress)  # fmt: skip
+    assert result.interrupted and 1 <= result.frames_processed < 30
+
+
+def test_an_error_in_on_progress_stops_the_run(make_video, tmp_path):
+    def on_progress(progress):
+        if progress.stage == "frames":
+            raise RuntimeError("the window was closed")
+
+    output = tmp_path / "e.mp4"
+    with pytest.raises(RuntimeError, match="window was closed"):
+        enhance_video(make_video(frames=30), output, ai=False, audio=False,
+                      show_progress=False, on_progress=on_progress)  # fmt: skip
+    assert not output.exists()

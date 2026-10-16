@@ -164,6 +164,45 @@ def interpolation_advice(input_fps: float, output_fps: float, frames: int) -> st
 
 
 @dataclass(frozen=True)
+class Progress:
+    """Where a run stands, handed to the ``on_progress`` callback of :func:`enhance_video`
+    and :meth:`VideoEnhancer.enhance`.
+
+    The callback runs in the thread that called ``enhance``, between frames, so it should
+    be quick (update a progress bar, send a message). An exception raised in it stops the
+    run like any other error; to stop early and keep what's done, set ``stop_event``.
+    """
+
+    stage: str
+    """``"loading"``: before the first frame, while the device is set up and the models
+    are loaded (downloaded on first use). ``"frames"``: after frames are written, at most
+    10 times a second, and always after the first and the last one. ``"finishing"``:
+    closing the MP4 and adding the audio."""
+
+    frames_done: int
+    """Input frames finished in this run."""
+
+    frames_total: int
+    """Input frames this run will process (fewer are done if it's stopped early)."""
+
+    frames_written: int
+    """Frames written to the output so far (more than ``frames_done`` when the frame rate
+    goes up)."""
+
+    elapsed_seconds: float
+    """Time since the run started, model loading included."""
+
+    eta_seconds: float | None = None
+    """Estimated time left for the frames, from the speed so far; ``None`` until the
+    first frame is done."""
+
+    @property
+    def fraction(self) -> float:
+        """Share of the frames done, from 0.0 to 1.0."""
+        return min(1.0, self.frames_done / self.frames_total) if self.frames_total else 0.0
+
+
+@dataclass(frozen=True)
 class EnhanceResult:
     """What a run actually produced."""
 

@@ -49,7 +49,7 @@ from .frames import blend_with_classic_upscale, mean_brightness, repeat_count, r
 from .interpolation import FrameInterpolator, Retimer, ensure_rife_weights
 from .models import ensure_weights, get_model, resolve_weights_dir
 from .options import EnhanceOptions
-from .planning import EnhanceResult, RunPlan, interpolation_advice, plan_run
+from .planning import EnhanceResult, Progress, RunPlan, interpolation_advice, plan_run
 from .upscaler import AIUpscaler
 from .video import FrameReader, SourceFrame, probe_video
 
@@ -88,13 +88,19 @@ class VideoEnhancer:
         *,
         stop_event: threading.Event | None = None,
         show_progress: bool = True,
+        on_progress: Callable[[Progress], None] | None = None,
     ) -> EnhanceResult:
         """Enhance ``input_path`` and write a silent MP4 to ``output_path``.
 
         Set ``stop_event`` from another thread (or a signal handler) to stop
         early: the current frame is finished and everything processed so far
         is saved as a valid, playable MP4.
+
+        ``on_progress`` receives a :class:`~framelift.planning.Progress` before the
+        first frame, as frames are done, and while finishing. ``show_progress``
+        controls only the terminal progress bar.
         """
+        started_at = time.perf_counter()
         options = self.options
         options.validate()
 
@@ -130,8 +136,11 @@ class VideoEnhancer:
                 "the AI" if options.uses_ai else "RIFE",
             )
 
+        report = _ProgressReporter(on_progress, plan.frames_to_process, started_at)
+        report("loading")
         upscaler = self._get_upscaler(device) if options.uses_ai else None
-        return self._run(plan, upscaler, device, encoder, output_path, stop_event, show_progress)
+        return self._run(plan, upscaler, device, encoder, output_path, stop_event, show_progress,
+                         report)  # fmt: skip
 
     # -- internals -------------------------------------------------------------
 
@@ -169,9 +178,11 @@ class VideoEnhancer:
         output_path: Path,
         stop_event: threading.Event,
         show_progress: bool,
+        report: _ProgressReporter | None = None,
     ) -> EnhanceResult:
         opts = self.options
         started_at = time.perf_counter()
+        report = report or _ProgressReporter(None, plan.frames_to_process, started_at)
 
         retimer = None
         if opts.interpolate:
@@ -269,9 +280,11 @@ class VideoEnhancer:
             processed += 1
             last_frame = frame.number
             progress.update(1)
+            report("frames", processed, writer.frames_written)
             if opts.debug_timings:
                 self._diagnostics(processed, frame.number, reader, writer, laps, device)
 
+        report.frames_start()
         try:
             with reader, progress:
                 waiting_since = time.perf_counter()
@@ -326,6 +339,8 @@ class VideoEnhancer:
                     "%d frames were identical to the one before; the AI's result was reused.",
                     reused,
                 )
+            report("frames", processed, writer.frames_written, force=True)
+            report("finishing", processed, writer.frames_written)
             writer.finish()
             audio = self._add_audio(plan, output_path, processed) if opts.audio else "disabled"
             finished = True
@@ -428,6 +443,7 @@ def enhance_video(
     *,
     stop_event: threading.Event | None = None,
     show_progress: bool = True,
+    on_progress: Callable[[Progress], None] | None = None,
     **overrides,
 ) -> EnhanceResult:
     """Enhance a video in one call.
@@ -436,6 +452,12 @@ def enhance_video(
     arguments, or both (keywords win)::
 
         enhance_video("in.mp4", "out.mp4", scale=2, profile="old_tv")
+
+    ``on_progress`` is called with a :class:`~framelift.planning.Progress` as the run
+    goes (see :meth:`VideoEnhancer.enhance`)::
+
+        enhance_video("in.mp4", "out.mp4", show_progress=False,
+                      on_progress=lambda p: print(f"{p.fraction:.0%}"))
     """
     if overrides:
         base = options or EnhanceOptions()
@@ -445,7 +467,11 @@ def enhance_video(
         options = EnhanceOptions(**{**vars(base), **overrides})
 
     return VideoEnhancer(options).enhance(
-        input_path, output_path, stop_event=stop_event, show_progress=show_progress
+        input_path,
+        output_path,
+        stop_event=stop_event,
+        show_progress=show_progress,
+        on_progress=on_progress,
     )
 
 
@@ -460,6 +486,40 @@ _BLACK_AFTER_AI = (
     "The first enhanced frame came out black. This usually points to a corrupt "
     "weights file or a GPU/driver problem — try --device cpu to compare."
 )
+
+
+class _ProgressReporter:
+    """Builds :class:`Progress` records and hands them to the user's callback, at most
+    10 times a second while frames are being done."""
+
+    def __init__(self, callback: Callable[[Progress], None] | None, total: int,
+                 started_at: float) -> None:  # fmt: skip
+        self._callback = callback
+        self._total = total
+        self._started_at = started_at
+        self._frames_started_at: float | None = None
+        self._last = 0.0
+
+    def __call__(self, stage: str, done: int = 0, written: int = 0, *, force: bool = False):
+        if self._callback is None:
+            return
+        now = time.perf_counter()
+        if stage == "frames":
+            if done in (1, self._total):  # the first and last frames are always reported
+                force = True
+            if not force and now - self._last < 0.1:
+                return
+        eta = None
+        if stage == "frames" and done and self._frames_started_at is not None:
+            # The speed since the frames started (model loading excluded), applied to
+            # the frames left.
+            eta = (now - self._frames_started_at) / done * (self._total - done)
+        self._last = now
+        self._callback(Progress(stage, done, self._total, written, now - self._started_at, eta))
+
+    def frames_start(self) -> None:
+        """Note that loading is over and the frames begin (the base for the estimate)."""
+        self._frames_started_at = time.perf_counter()
 
 
 class _NoAI:
