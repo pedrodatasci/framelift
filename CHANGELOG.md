@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-10-15
+
+The first step towards publishing framelift on PyPI: it now installs with plain pip,
+without the packages that used to break.
+
+### Changed
+
+- **No more `basicsr`, `realesrgan` or `torchvision`.** framelift only used the two
+  Real-ESRGAN network definitions from them, and runs the networks itself. They now live
+  in `framelift.archs`, copied from BasicSR 1.4.2 under its Apache-2.0 license
+  (`LICENSE-BasicSR.txt`). Same parameters and same computations: the published weights
+  load as before and give identical results (checked against the original classes with
+  the default, x4plus and anime models). `basicsr` compiled at install time and needed a
+  patch to import with torchvision 0.17+; both problems are gone.
+- **Model weights go to your user cache folder by default**, so running framelift from
+  any folder no longer downloads them there again: `%LOCALAPPDATA%\framelift\weights`
+  on Windows, `~/Library/Caches/framelift/weights` on macOS and
+  `~/.cache/framelift/weights` on Linux.
+  - A `weights` folder in the current directory that already has models keeps being
+    used, so nothing is downloaded again after upgrading.
+  - The `FRAMELIFT_WEIGHTS` environment variable picks the folder for every run, and
+    `--weights-dir` still overrides everything.
+  - `EnhanceOptions.weights_dir` now defaults to `None` (meaning this default);
+    `framelift.models.default_weights_dir()` says where that is.
+- `requirements.txt` lists PyTorch instead of the Real-ESRGAN packages (and no longer the
+  face-restoration ones they pulled in).
+
+### Compatibility
+
+- Every flag and the output are unchanged. The test that compares framelift with the
+  original `RealESRGANer` still exists; it runs when `realesrgan` and `basicsr` are
+  installed by hand, and is skipped otherwise.
+
 ## [1.0.0] — 2026-10-15
 
 The first stable release: the same features as 0.9.0, now considered complete for the

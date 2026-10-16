@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
+
+# Model weights downloaded by the tests stay in ./weights (ignored by git), not in the
+# user's cache folder.
+os.environ.setdefault("FRAMELIFT_WEIGHTS", "weights")
 
 
 @pytest.fixture

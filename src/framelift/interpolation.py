@@ -37,7 +37,7 @@ from torch.nn import functional
 
 from .device import Device
 from .filters import Frame
-from .models import download_file
+from .models import download_file, resolve_weights_dir
 from .planning import SNAP
 
 log = logging.getLogger(__name__)
@@ -52,9 +52,9 @@ count as a scene cut and are repeated, not interpolated. Consecutive frames of a
 score above 0.9; unrelated images, around 0.1."""
 
 
-def ensure_rife_weights(weights_dir: str | Path) -> Path:
+def ensure_rife_weights(weights_dir: str | Path | None = None) -> Path:
     """Return the local path to RIFE's weights, downloading them (25 MB) if needed."""
-    path = Path(weights_dir) / RIFE_FILENAME
+    path = resolve_weights_dir(weights_dir) / RIFE_FILENAME
     if not path.exists():
         download_file(RIFE_URL, path)
     return path

@@ -479,7 +479,7 @@ Run `framelift --help` for the same information in your terminal.
 | `--workers N` | `1` | Frames the AI works on at the same time, each with its share of the CPU threads. `2` can be faster on CPUs with many cores (`framelift tune` measures it). Uses a bit more memory; the output is the same. |
 | `--backend {torch,openvino}` | `torch` | What runs the AI on the CPU. `openvino` (Intel's runtime, `pip install openvino`) was ~13% faster in our tests on the default model and ~20% on `x4plus`, rounding a few values differently (at most 1 level out of 255). `framelift tune` compares them on your machine. |
 | `--prefetch N` | `2` | How many pre-cleaned frames the reader thread keeps ready. Raise it (e.g. `4`–`8`) with slow profiles like `heavy_noise` on a fast GPU. Each frame costs a little RAM. |
-| `--weights-dir DIR` | `weights` | Folder where model files are stored. Missing models are downloaded here automatically on first use (relative to the current directory). |
+| `--weights-dir DIR` | see text | Folder where model files are stored; missing models are downloaded there on first use. By default: the `FRAMELIFT_WEIGHTS` environment variable if set; otherwise a `weights` folder in the current directory if it already has models (where versions before 1.1 kept them); otherwise your user cache folder: `%LOCALAPPDATA%\framelift\weights` on Windows, `~/Library/Caches/framelift/weights` on macOS, `~/.cache/framelift/weights` on Linux. |
 
 ### Encoding
 
@@ -591,7 +591,8 @@ machine. Otherwise, rough guidance:
 - **OpenVINO.** Intel's runtime is often faster than PyTorch on CPU (`--backend openvino`)
   and can use Intel GPUs (`--device igpu`). The first run compiles the model for each tile
   size (a few seconds on CPU, longer on a GPU); the result is cached in
-  `weights/openvino_cache/`, so later runs start faster.
+  `openvino_cache/` inside the weights folder (see `--weights-dir`), so later runs start
+  faster.
 - **More CPU threads isn't always faster.** On laptops that mix performance and efficiency
   cores, a lower `--torch-threads` (say 4–6) can beat using them all. `framelift tune`
   tests this for you. Keep the laptop plugged in and out of power-saving mode, too.
@@ -730,7 +731,7 @@ All errors inherit from `framelift.FrameliftError`:
 | --- | --- |
 | `InvalidOptionError` | An option can't work (also a `ValueError`). |
 | `VideoReadError` | The input is missing, unreadable or has no frame rate. |
-| `MissingDependencyError` | FFmpeg or the Real-ESRGAN packages aren't installed. |
+| `MissingDependencyError` | Something optional isn't installed: FFmpeg, OpenVINO (`--device igpu`) or VLC (`--pick-range`). |
 | `OutOfMemoryError` | The model ran out of memory; retry with a smaller `tile`. |
 | `EncodingError` | FFmpeg failed. |
 | `BlackFrameError` | The first frame is black before or after the AI. |
@@ -832,15 +833,10 @@ NVIDIA GPU (use `--device cpu`), or you have the CPU-only PyTorch build. Check w
 **`Ran out of memory while upscaling`** — Lower `--tile` (256 → 128 → 64). On CUDA,
 `--half` roughly halves memory use.
 
-**`No module named 'torchvision.transforms.functional_tensor'`** — A known
-incompatibility between `basicsr` and torchvision 0.17+. framelift patches it
-automatically when it loads a model, so if you see it, it comes from code that imports
-`basicsr` or `realesrgan` directly, not from framelift.
-
 **`The first frame is almost completely black`** — Checked *before* the AI, it means
 decoding or the profile is the problem: try `--profile none`, or re-encode the input
-with FFmpeg. *After* the AI, suspect a corrupt weights file (delete it from `weights/`
-to re-download) or a GPU driver issue (compare with `--device cpu`).
+with FFmpeg. *After* the AI, suspect a corrupt weights file (delete it from the weights
+folder, see `--weights-dir`, to re-download) or a GPU driver issue (compare with `--device cpu`).
 
 **`--output-fps … is lower than the input's`** — Lowering the frame rate isn't
 supported. Leave `--output-fps` out, or convert the input first with
@@ -935,7 +931,10 @@ What changed — including a few bug fixes — is listed in the
   draws the in-between frames for `--interpolate`. framelift includes its network
   definition (version 4.26) and downloads the weights from
   [vs-rife](https://github.com/HolyWu/vs-rife) (MIT).
-- [BasicSR](https://github.com/XPixelGroup/BasicSR), [PyTorch](https://pytorch.org),
-  [OpenCV](https://opencv.org) and [FFmpeg](https://ffmpeg.org).
+- [BasicSR](https://github.com/XPixelGroup/BasicSR) (Apache-2.0): framelift includes its
+  definitions of the Real-ESRGAN networks, in `src/framelift/archs.py`, under
+  [its license](LICENSE-BasicSR.txt).
+- [PyTorch](https://pytorch.org), [OpenCV](https://opencv.org) and
+  [FFmpeg](https://ffmpeg.org).
 
 framelift itself is released under the [MIT License](LICENSE).

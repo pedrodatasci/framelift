@@ -282,7 +282,7 @@ def tune_video(
         best_model = None
 
     fast_spec = get_model(fast_model)
-    fast_weights = ensure_weights(fast_spec, Path(options.weights_dir).resolve())
+    fast_weights = ensure_weights(fast_spec, options.weights_dir)
     cleaned = profile.apply(sample)
     preprocess_seconds = _time_it(lambda: profile.apply(sample))
 
@@ -314,7 +314,7 @@ def tune_video(
     fast_crop_seconds = None
     for model in filter(None, (fast_model, best_model)):
         spec = get_model(model)
-        weights = ensure_weights(spec, Path(options.weights_dir).resolve())
+        weights = ensure_weights(spec, options.weights_dir)
         log.info("Measuring what %s does to this footage…", spec.name)
         upscalers[model] = AIUpscaler(spec, weights, device, tile=0, half=speed.get("half", False),
                                       backend=speed.get("backend", options.backend))  # fmt: skip

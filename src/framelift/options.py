@@ -102,8 +102,10 @@ class EnhanceOptions:
     prefetch: int = 2
     """How many pre-processed frames the reader thread keeps ready."""
 
-    weights_dir: str | Path = "weights"
-    """Where model weights are stored (and downloaded to on first use)."""
+    weights_dir: str | Path | None = None
+    """Where model weights are stored (and downloaded to on first use). ``None``: the
+    ``FRAMELIFT_WEIGHTS`` environment variable, an existing ``./weights`` folder with
+    models, or the user's cache folder (see :func:`framelift.models.default_weights_dir`)."""
 
     # --- Encoding ------------------------------------------------------------
     audio: bool = True

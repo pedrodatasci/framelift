@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from framelift import EnhanceOptions, InvalidOptionError
@@ -10,8 +12,8 @@ def test_defaults_match_the_original_script():
     assert (o.device, o.tile, o.tile_pad, o.pre_pad, o.gpu_id) == ("auto", 256, 10, 0, 0)
     assert (o.encoder, o.crf, o.x264_preset, o.prefetch) == ("cpu", 20, "veryfast", 2)
     assert (o.start_frame, o.max_frames, o.output_fps) == (1, None, None)
-    assert (o.timing_every, o.gc_every, o.weights_dir) == (20, 0, "weights")
-    assert o.audio is True
+    assert (o.timing_every, o.gc_every, o.weights_dir) == (20, 0, None)
+    assert o.audio is True and o.ai is True
     o.validate()
 
 
@@ -55,3 +57,47 @@ def test_workers_and_backend_are_validated():
     for bad in ({"workers": 0}, {"workers": 99}, {"backend": "onnx"}):
         with pytest.raises(InvalidOptionError):
             EnhanceOptions(**bad).validate()
+
+
+@pytest.mark.parametrize(
+    ("options", "uses_ai"),
+    [({}, True), ({"ai": False}, False), ({"ai_strength": 0}, False), ({"ai_strength": -1}, False)],
+)
+def test_no_ai_and_zero_strength_both_turn_the_ai_off(options, uses_ai):
+    assert EnhanceOptions(**options).uses_ai is uses_ai
+
+
+def test_weights_go_to_the_user_cache_by_default(tmp_path, monkeypatch):
+    import sys
+
+    from framelift.models import default_weights_dir, resolve_weights_dir
+
+    monkeypatch.chdir(tmp_path)  # no ./weights here
+    monkeypatch.delenv("FRAMELIFT_WEIGHTS", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    expected = {"win32": tmp_path / "local", "darwin": Path.home() / "Library" / "Caches"}
+    base = expected.get(sys.platform, tmp_path / "cache")
+    assert default_weights_dir() == base / "framelift" / "weights"
+
+    # An explicit folder wins, made absolute.
+    assert resolve_weights_dir("models") == tmp_path / "models"
+
+
+def test_weights_from_older_versions_stay_where_they_are(tmp_path, monkeypatch):
+    from framelift.models import default_weights_dir
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FRAMELIFT_WEIGHTS", raising=False)
+    (tmp_path / "weights").mkdir()
+    (tmp_path / "weights" / "notes.txt").write_text("not a model")
+    assert default_weights_dir() != Path("weights")  # a folder without models doesn't count
+    (tmp_path / "weights" / "realesr-animevideov3.pth").write_bytes(b"")
+    assert default_weights_dir() == Path("weights")
+
+
+def test_the_environment_variable_picks_the_folder(tmp_path, monkeypatch):
+    from framelift.models import default_weights_dir
+
+    monkeypatch.setenv("FRAMELIFT_WEIGHTS", str(tmp_path / "shared"))
+    assert default_weights_dir() == tmp_path / "shared"

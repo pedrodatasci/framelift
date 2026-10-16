@@ -28,9 +28,6 @@ dependencies = [
     "tqdm>=4.60",
     "Pillow>=9",
     "torch>=1.7",
-    "torchvision",
-    "realesrgan>=0.3.0",
-    "basicsr>=1.4.2",
 ]
 
 [project.optional-dependencies]

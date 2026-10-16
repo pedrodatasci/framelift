@@ -1,15 +1,12 @@
-"""Full pipeline on a tiny clip. Needs PyTorch, Real-ESRGAN, FFmpeg and network
-(or a pre-downloaded ``weights/realesr-animevideov3.pth``). Run with ``pytest -m slow``."""
+"""Full pipeline on a tiny clip. Needs PyTorch, FFmpeg and network (or a pre-downloaded
+``weights/realesr-animevideov3.pth``). Run with ``pytest -m slow``."""
 
-import importlib.util
 import threading
 
 import pytest
 
 # Skip the whole module *before* importing anything that pulls in PyTorch.
 pytest.importorskip("torch")
-if not (importlib.util.find_spec("basicsr") and importlib.util.find_spec("realesrgan")):
-    pytest.skip("Real-ESRGAN not installed", allow_module_level=True)
 
 from framelift import (  # noqa: E402
     EnhanceOptions,
@@ -177,16 +174,31 @@ def test_workers_change_speed_not_output(make_video, tmp_path):
 
 
 def test_upscaler_matches_realesrgan_exactly(make_video):
-    """AIUpscaler re-implements RealESRGANer.enhance; the output must not change."""
+    """AIUpscaler re-implements RealESRGANer.enhance with its own copy of the networks;
+    the output must not change. Needs the original packages, which framelift itself no
+    longer installs: ``pip install realesrgan basicsr``."""
     import contextlib
+    import importlib.util
     import io
+    import sys
+    import types
 
     from framelift.device import resolve_device
     from framelift.models import ensure_weights, get_model
-    from framelift.upscaler import AIUpscaler, _import_realesrgan, build_network
+    from framelift.upscaler import AIUpscaler, build_network
     from framelift.video import read_frames
 
-    _, _, RealESRGANer = _import_realesrgan()  # noqa: N806
+    if importlib.util.find_spec("realesrgan") is None:
+        pytest.skip("the original Real-ESRGAN packages aren't installed")
+    # basicsr imports a torchvision module removed in torchvision 0.17.
+    shim = "torchvision.transforms.functional_tensor"
+    try:
+        __import__(shim)
+    except ImportError:
+        import torchvision.transforms.functional as functional
+
+        sys.modules[shim] = types.SimpleNamespace(rgb_to_grayscale=functional.rgb_to_grayscale)
+    from realesrgan import RealESRGANer
 
     frame = read_frames(make_video(frames=2), [1])[0][1]
     spec = get_model("realesr-animevideov3")

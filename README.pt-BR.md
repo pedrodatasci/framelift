@@ -485,7 +485,7 @@ framelift -i ENTRADA -o SAIDA [opções]
 | `--workers N` | `1` | Quantos frames a IA processa ao mesmo tempo, cada um com sua parte das threads de CPU. `2` pode ser mais rápido em CPUs com muitos núcleos (o `framelift tune` mede). Usa um pouco mais de memória; a saída é a mesma. |
 | `--backend {torch,openvino}` | `torch` | O que roda a IA na CPU. O `openvino` (runtime da Intel, `pip install openvino`) foi ~13% mais rápido nos nossos testes com o modelo padrão e ~20% com o `x4plus`, arredondando alguns valores de outro jeito (no máximo 1 nível em 255). O `framelift tune` compara os dois na sua máquina. |
 | `--prefetch N` | `2` | Quantos frames já limpos a thread leitora deixa prontos. Aumente (ex.: `4`–`8`) com perfis lentos como `heavy_noise` numa GPU rápida. Cada frame custa um pouco de RAM. |
-| `--weights-dir PASTA` | `weights` | Pasta onde ficam os arquivos dos modelos. Os que faltarem são baixados aqui automaticamente no primeiro uso (relativa à pasta atual). |
+| `--weights-dir PASTA` | veja o texto | Pasta onde ficam os arquivos dos modelos; os que faltarem são baixados nela no primeiro uso. Por padrão: a variável de ambiente `FRAMELIFT_WEIGHTS`, se definida; senão uma pasta `weights` na pasta atual, se ela já tiver modelos (onde as versões antes da 1.1 os guardavam); senão a pasta de cache do usuário: `%LOCALAPPDATA%\framelift\weights` no Windows, `~/Library/Caches/framelift/weights` no macOS, `~/.cache/framelift/weights` no Linux. |
 
 ### Codificação
 
@@ -599,7 +599,8 @@ na sua máquina. Fora isso, um guia aproximado:
 - **OpenVINO.** O runtime da Intel costuma ser mais rápido que o PyTorch na CPU
   (`--backend openvino`) e consegue usar GPUs Intel (`--device igpu`). A primeira execução
   compila o modelo para cada tamanho de tile (alguns segundos na CPU, mais numa GPU); o
-  resultado fica em `weights/openvino_cache/`, então as próximas começam mais rápido.
+  resultado fica em `openvino_cache/`, dentro da pasta dos pesos (veja `--weights-dir`),
+  então as próximas começam mais rápido.
 - **Mais threads de CPU nem sempre é mais rápido.** Em notebooks que misturam núcleos de
   desempenho e de eficiência, um `--torch-threads` menor (algo como 4–6) pode ganhar de usar
   todos. O `framelift tune` testa isso para você. E deixe o notebook na tomada e fora do
@@ -740,7 +741,7 @@ Todos os erros herdam de `framelift.FrameliftError`:
 | --- | --- |
 | `InvalidOptionError` | Uma opção não tem como funcionar (também é `ValueError`). |
 | `VideoReadError` | A entrada não existe, não pode ser lida ou não tem frame rate. |
-| `MissingDependencyError` | FFmpeg ou os pacotes do Real-ESRGAN não estão instalados. |
+| `MissingDependencyError` | Falta algo opcional: FFmpeg, OpenVINO (`--device igpu`) ou VLC (`--pick-range`). |
 | `OutOfMemoryError` | O modelo ficou sem memória; tente de novo com `tile` menor. |
 | `EncodingError` | O FFmpeg falhou. |
 | `BlackFrameError` | O primeiro frame está preto antes ou depois da IA. |
@@ -842,15 +843,10 @@ Windows, adicione ao `PATH` a pasta que contém o `ffmpeg.exe`.
 **`Ran out of memory while upscaling`**: diminua o `--tile` (256 → 128 → 64). Na CUDA, o
 `--half` corta o uso de memória mais ou menos pela metade.
 
-**`No module named 'torchvision.transforms.functional_tensor'`**: é uma incompatibilidade
-conhecida entre o `basicsr` e o torchvision 0.17+. O framelift corrige isso
-automaticamente ao carregar um modelo; se você vir esse erro, ele vem de código que
-importa `basicsr` ou `realesrgan` diretamente, e não do framelift.
-
 **`The first frame is almost completely black`**: se a verificação for *antes* da IA, o
 problema está na decodificação ou no perfil. Tente `--profile none` ou recodifique a
 entrada com o FFmpeg. Se for *depois* da IA, suspeite de um arquivo de pesos corrompido
-(apague-o de `weights/` para baixar de novo) ou de problema de driver da GPU (compare com
+(apague-o da pasta dos pesos, veja `--weights-dir`, para baixar de novo) ou de problema de driver da GPU (compare com
 `--device cpu`).
 
 **`--output-fps … is lower than the input's`**: reduzir o frame rate não é suportado.
@@ -944,7 +940,10 @@ O que mudou, incluindo algumas correções de bugs, está no
 - [RIFE](https://github.com/hzwer/Practical-RIFE), de Zhewei Huang et al. (MIT), que
   desenha os frames intermediários do `--interpolate`. O framelift inclui a definição da
   rede (versão 4.26) e baixa os pesos do [vs-rife](https://github.com/HolyWu/vs-rife) (MIT).
-- [BasicSR](https://github.com/XPixelGroup/BasicSR), [PyTorch](https://pytorch.org),
-  [OpenCV](https://opencv.org) e [FFmpeg](https://ffmpeg.org).
+- [BasicSR](https://github.com/XPixelGroup/BasicSR) (Apache-2.0): o framelift inclui as
+  definições das redes do Real-ESRGAN dele, em `src/framelift/archs.py`, sob
+  [a licença dele](LICENSE-BasicSR.txt).
+- [PyTorch](https://pytorch.org), [OpenCV](https://opencv.org) e
+  [FFmpeg](https://ffmpeg.org).
 
 O framelift é distribuído sob a [Licença MIT](LICENSE).

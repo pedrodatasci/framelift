@@ -7,6 +7,8 @@ models and downloads files, so it's cheap to import (e.g. for ``--help``).
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,9 +91,42 @@ def get_model(name: str) -> ModelSpec:
         raise ValueError(f"Unknown model '{name}'. Available: {choices}.") from None
 
 
-def ensure_weights(model: ModelSpec, weights_dir: str | Path) -> Path:
+def default_weights_dir() -> Path:
+    """Where model weights are kept when ``weights_dir`` isn't given.
+
+    1. The ``FRAMELIFT_WEIGHTS`` environment variable, if set.
+    2. A ``weights`` folder in the current directory that already holds models (where
+       framelift kept them before 1.1), so nothing is downloaded again.
+    3. The user's cache folder: ``%LOCALAPPDATA%\\framelift\\weights`` on Windows,
+       ``~/Library/Caches/framelift/weights`` on macOS, ``~/.cache/framelift/weights``
+       (or ``$XDG_CACHE_HOME/framelift/weights``) elsewhere.
+    """
+    configured = os.environ.get("FRAMELIFT_WEIGHTS")
+    if configured:
+        return Path(configured).expanduser()
+
+    legacy = Path("weights")
+    known = [spec.filename for spec in MODELS.values()]
+    if any((legacy / name).is_file() for name in known) or any(legacy.glob("rife-v*.pkl")):
+        return legacy
+
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "framelift" / "weights"
+
+
+def resolve_weights_dir(weights_dir: str | Path | None) -> Path:
+    """``weights_dir`` as an absolute path, or :func:`default_weights_dir` if ``None``."""
+    return Path(weights_dir if weights_dir is not None else default_weights_dir()).resolve()
+
+
+def ensure_weights(model: ModelSpec, weights_dir: str | Path | None = None) -> Path:
     """Return the local path to ``model``'s weights, downloading them if needed."""
-    weights_path = Path(weights_dir) / model.filename
+    weights_path = resolve_weights_dir(weights_dir) / model.filename
 
     if not weights_path.exists():
         download_file(model.url, weights_path)

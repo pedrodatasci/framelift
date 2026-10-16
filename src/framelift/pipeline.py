@@ -47,7 +47,7 @@ from .errors import BlackFrameError, InvalidOptionError, NothingToDoError, Video
 from .filters import Frame, get_profile
 from .frames import blend_with_classic_upscale, mean_brightness, repeat_count, resize_exact
 from .interpolation import FrameInterpolator, Retimer, ensure_rife_weights
-from .models import ensure_weights, get_model
+from .models import ensure_weights, get_model, resolve_weights_dir
 from .options import EnhanceOptions
 from .planning import EnhanceResult, RunPlan, interpolation_advice, plan_run
 from .upscaler import AIUpscaler
@@ -137,13 +137,13 @@ class VideoEnhancer:
 
     def _get_upscaler(self, device: Device) -> AIUpscaler:
         opts = self.options
-        key = (opts.model, str(Path(opts.weights_dir).resolve()), device, opts.tile,
+        key = (opts.model, str(resolve_weights_dir(opts.weights_dir)), device, opts.tile,
                opts.tile_pad, opts.pre_pad, opts.half, opts.backend,
                current_cpu_threads())  # fmt: skip
 
         if self._upscaler is None or self._upscaler_key != key:
             spec = get_model(opts.model)
-            weights = ensure_weights(spec, Path(opts.weights_dir).resolve())
+            weights = ensure_weights(spec, opts.weights_dir)
             log.info("Loading %s…", spec.name)
             log.debug("  weights: %s", weights)
             self._upscaler = AIUpscaler(
@@ -175,7 +175,7 @@ class VideoEnhancer:
 
         retimer = None
         if opts.interpolate:
-            weights = ensure_rife_weights(Path(opts.weights_dir).resolve())
+            weights = ensure_rife_weights(opts.weights_dir)
             interpolator = FrameInterpolator(weights, device, plan.width, plan.height,
                                              half=opts.half and device.is_gpu,
                                              backend=opts.backend)  # fmt: skip

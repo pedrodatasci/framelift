@@ -238,10 +238,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hardware.add_argument(
         "--weights-dir",
-        default=str(defaults.weights_dir),
+        default=defaults.weights_dir,
         metavar="DIR",
         help="Folder for model weights; missing ones are downloaded automatically. "
-        "(default: %(default)s)",
+        "(default: $FRAMELIFT_WEIGHTS, or ./weights if it already has models, or your "
+        "user cache folder, e.g. ~/.cache/framelift/weights)",
     )
 
     encoding = parser.add_argument_group("encoding")

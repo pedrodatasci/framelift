@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import math
-import sys
 import threading
-import types
 from pathlib import Path
 
 import cv2
@@ -15,67 +12,15 @@ import numpy as np
 import torch
 from torch.nn import functional
 
+from .archs import RRDBNet, SRVGGNetCompact
 from .device import INSTALL_OPENVINO, Device
 from .errors import MissingDependencyError, OutOfMemoryError
 from .filters import Frame
 from .models import ModelSpec
 
 
-class _Discard(io.TextIOBase):
-    def write(self, text: str) -> int:
-        return len(text)
-
-
-_SILENT = _Discard()
-
-INSTALL_HINT = "pip install realesrgan basicsr facexlib gfpgan opencv-python tqdm pillow"
-
-
-def _patch_torchvision_for_basicsr() -> None:
-    """Keep ``basicsr`` importable on modern torchvision.
-
-    ``basicsr`` imports ``torchvision.transforms.functional_tensor``, a module
-    torchvision removed in 0.17. We register a tiny stand-in that provides the
-    one function basicsr needs — but only if the real module is really gone.
-    """
-    module_name = "torchvision.transforms.functional_tensor"
-    if module_name in sys.modules:
-        return
-
-    try:
-        __import__(module_name)
-        return  # older torchvision: the real module still exists
-    except ImportError:
-        pass
-
-    try:
-        import torchvision.transforms.functional as functional
-    except ImportError:
-        return  # torchvision missing entirely; the import below will explain
-
-    shim = types.ModuleType(module_name)
-    shim.rgb_to_grayscale = functional.rgb_to_grayscale
-    sys.modules[module_name] = shim
-
-
-def _import_realesrgan():
-    _patch_torchvision_for_basicsr()
-    try:
-        from basicsr.archs.rrdbnet_arch import RRDBNet
-        from basicsr.archs.srvgg_arch import SRVGGNetCompact
-        from realesrgan import RealESRGANer
-    except Exception as exc:  # basicsr can fail with more than ImportError
-        raise MissingDependencyError(
-            f"Couldn't import the Real-ESRGAN packages ({exc}).\n"
-            f"Install them with:\n  {INSTALL_HINT}"
-        ) from exc
-
-    return RRDBNet, SRVGGNetCompact, RealESRGANer
-
-
 def build_network(spec: ModelSpec) -> torch.nn.Module:
     """Create the (untrained) network architecture that matches ``spec``."""
-    RRDBNet, SRVGGNetCompact, _ = _import_realesrgan()
 
     if spec.architecture == "rrdb":
         return RRDBNet(
