@@ -369,3 +369,32 @@ def test_an_error_in_on_progress_stops_the_run(make_video, tmp_path):
         enhance_video(make_video(frames=30), output, ai=False, audio=False,
                       show_progress=False, on_progress=on_progress)  # fmt: skip
     assert not output.exists()
+
+
+@pytest.mark.parametrize("arch", ["SRVGGNetCompact", "RRDBNet"])
+def test_openvino_keeps_the_colors(arch, tmp_path):
+    """OpenVINO gives PyTorch's result, colors included, for both kinds of network. Up to
+    1.4.2, the x4plus ones (RRDBNet) came out of OpenVINO with red and blue swapped."""
+    pytest.importorskip("openvino")
+    import numpy as np
+    import torch
+
+    from framelift import archs
+    from framelift.upscaler import OpenVINOModel
+
+    torch.manual_seed(0)
+    if arch == "RRDBNet":
+        net = archs.RRDBNet(3, 3, num_block=1)
+        with torch.no_grad():  # a clearly different level per channel, so a swap shows
+            net.conv_last.bias.copy_(torch.tensor([0.2, 0.5, 0.8]))
+    else:
+        net = archs.SRVGGNetCompact(num_conv=2)
+    net.eval()
+    image = np.random.default_rng(0).integers(0, 256, (24, 32, 3), dtype=np.uint8)
+    image[:, :16] = (20, 120, 230)  # strongly colored: orange, in BGR
+    with torch.no_grad():
+        rgb = torch.from_numpy(image[..., ::-1].copy()).permute(2, 0, 1)[None].float() / 255
+        expected = (net(rgb)[0].clamp(0, 1) * 255).round().byte().permute(1, 2, 0).numpy()
+    expected = expected[..., ::-1]
+    got = OpenVINOModel(net, "CPU", half=False, cache_dir=tmp_path)(image)
+    assert np.abs(got.astype(int) - expected.astype(int)).max() <= 1

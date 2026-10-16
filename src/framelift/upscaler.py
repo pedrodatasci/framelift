@@ -230,10 +230,14 @@ class OpenVINOModel:
     """A Real-ESRGAN network compiled by OpenVINO, for an Intel GPU or the CPU.
 
     Called with an 8-bit BGR image ``(height, width, 3)``, as OpenCV holds it, and returns
-    the 8-bit BGR result at the model's scale. The conversions around the network (to RGB
-    in [0, 1] on the way in; Real-ESRGAN's clamp, x255 and round-half-to-even on the way
-    out) are compiled into the model, so on a GPU they run there too, the CPU is left
+    the 8-bit BGR result at the model's scale. The conversions around the network (to
+    [0, 1] floats on the way in; Real-ESRGAN's clamp, x255 and round-half-to-even on the
+    way out) are compiled into the model, so on a GPU they run there too, the CPU is left
     alone, and a quarter of the data comes back (8 bits per value instead of 32).
+
+    The BGR ↔ RGB swaps are done here, on the 8-bit arrays, not in the model: OpenVINO
+    folds a channel swap into the network's first or last layer, and with the x4plus
+    networks (RRDBNet) that fold came out wrong, with red and blue mixed up.
 
     Each tile size gets compiled once (a few seconds on a GPU, cached on disk for later
     runs), and each thread gets its own inference request, so several workers can use it.
@@ -265,15 +269,16 @@ class OpenVINOModel:
         self._local = threading.local()
 
     def __call__(self, image: np.ndarray) -> np.ndarray:
-        image = np.ascontiguousarray(image)
-        shape = image.shape
+        rgb = np.ascontiguousarray(image[..., ::-1])
+        shape = rgb.shape
         requests = self._local.__dict__.setdefault("requests", {})
         if shape not in requests:
             requests[shape] = self._compile(shape).create_infer_request()
         request = requests[shape]
-        request.infer({0: image[np.newaxis]})
-        # The request reuses its output buffer on the next call, so keep a copy.
-        return request.get_output_tensor(0).data[0].copy()
+        request.infer({0: rgb[np.newaxis]})
+        # Back to BGR. The request reuses its output buffer on the next call, so this copy
+        # (which the swap needs anyway) is also what keeps the result.
+        return np.ascontiguousarray(request.get_output_tensor(0).data[0][..., ::-1])
 
     def _compile(self, shape: tuple[int, ...]):
         with self._lock:
@@ -285,8 +290,9 @@ class OpenVINOModel:
 
 
 def _with_8bit_io(ov, model):
-    """``model`` (NCHW, RGB floats in [0, 1]) made to take and return 8-bit BGR, NHWC."""
-    from openvino.preprocess import ColorFormat, PrePostProcessor
+    """``model`` (NCHW, floats in [0, 1]) made to take and return 8-bit NHWC images, in
+    the same channel order (RGB): :class:`OpenVINOModel` swaps BGR ↔ RGB around it."""
+    from openvino.preprocess import PrePostProcessor
 
     try:
         import openvino.opset13 as ops
@@ -294,19 +300,15 @@ def _with_8bit_io(ov, model):
         import openvino.runtime.opset13 as ops
 
     def to_8bit(output):
-        # Real-ESRGAN's own rounding: clamp to [0, 1], x255, round half to even, RGB → BGR.
+        # Real-ESRGAN's own rounding: clamp to [0, 1], x255, round half to even.
         value = ops.clamp(output, 0.0, 1.0)
         value = ops.multiply(value, ops.constant(np.float32(255.0)))
-        value = ops.round(value, "half_to_even")
-        bgr = ops.constant(np.array([2, 1, 0], dtype=np.int64))
-        return ops.gather(value, bgr, ops.constant(np.int64(1))).output(0)
+        return ops.round(value, "half_to_even").output(0)
 
     ppp = PrePostProcessor(model)
-    ppp.input().tensor().set_element_type(ov.Type.u8).set_layout(ov.Layout("NHWC")) \
-        .set_color_format(ColorFormat.BGR)  # fmt: skip
+    ppp.input().tensor().set_element_type(ov.Type.u8).set_layout(ov.Layout("NHWC"))
     ppp.input().model().set_layout(ov.Layout("NCHW"))
-    ppp.input().preprocess().convert_element_type(ov.Type.f32) \
-        .convert_color(ColorFormat.RGB).scale(255.0)  # fmt: skip
+    ppp.input().preprocess().convert_element_type(ov.Type.f32).scale(255.0)
     ppp.output().model().set_layout(ov.Layout("NCHW"))
     ppp.output().postprocess().custom(to_8bit)
     ppp.output().tensor().set_layout(ov.Layout("NHWC")).set_element_type(ov.Type.u8)

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.3] — 2026-10-16
+
+### Fixed
+
+- **Wrong colors with the x4plus models on an Intel GPU or OpenVINO.** With
+  `realesrgan-x4plus`, `realesrnet-x4plus` and `realesrgan-x4plus-anime-6B` (the RRDBNet
+  networks) and `--device igpu` or `--backend openvino`, red and blue came out swapped: an
+  orange sweater turned purple, yellow turned green. Since 1.4.0, the swap between
+  OpenCV's BGR and the networks' RGB was compiled into the OpenVINO model, and OpenVINO
+  folded it into these networks' layers wrongly. The swap is now done on the 8-bit images
+  around the model, at no measurable cost, and all four models give PyTorch's result
+  again, within 1 level out of 255. The default model wasn't affected, and neither was
+  PyTorch (NVIDIA GPU or CPU).
+  - `framelift tune` on an Intel GPU showed these models with the wrong colors in its
+    comparison sheet, so it's worth running again if you compared models with it.
+  - A new test checks OpenVINO against PyTorch for both kinds of network.
+
 ## [1.4.2] — 2026-10-16
 
 ### Fixed
