@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] — 2026-10-16
+
+### Changed
+
+- **On PyPI, framelift is `framelift-video`**: `pip install framelift-video`. The name
+  `framelift` was taken there by an unrelated project the day 1.4.0 was going to be
+  published. Nothing else changes: the command is still `framelift`, the code is still
+  `import framelift`, and the extras are `framelift-video[intel]` and
+  `framelift-video[picker]`. The other project also installs a `framelift` command and
+  module, so the two shouldn't be installed in the same environment.
+- 1.4.0 was never published on PyPI; 1.4.1 is the first release there.
+
 ## [1.4.0] — 2026-10-16
 
 framelift is ready for PyPI: `pip install framelift`.

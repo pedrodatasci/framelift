@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/framelift/
+      url: https://pypi.org/project/framelift-video/
     permissions:
       id-token: write  # lets PyPI verify this workflow; nothing else
     steps:
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/framelift/
+      url: https://test.pypi.org/project/framelift-video/
     permissions:
       id-token: write
     steps:

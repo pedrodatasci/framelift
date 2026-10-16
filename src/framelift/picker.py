@@ -36,7 +36,7 @@ from .video import VideoInfo, probe_video
 INSTALL_VLC = (
     "The range picker plays the video with VLC. Install VLC media player "
     "(https://www.videolan.org/vlc/, same 32/64-bit as Python) and its Python binding: "
-    'pip install python-vlc   (or: pip install -e ".[picker]")'
+    'pip install python-vlc   (or: pip install "framelift-video[picker]")'
 )
 INSTALL_TK = (
     "The range picker needs Tkinter, which some Linux distributions ship separately: "

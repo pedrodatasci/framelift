@@ -174,13 +174,16 @@ Em máquinas só com CPU, pule este passo.
 Depois instale o framelift:
 
 ```bash
-pip install framelift
+pip install framelift-video
 framelift --version
 ```
 
-Isso cria o comando `framelift`. `python -m framelift` também funciona.
+Isso cria o comando `framelift` (`python -m framelift` também funciona), e no Python é
+`import framelift`. Só o nome do pacote no PyPI é `framelift-video`: o `framelift` puro
+de lá é outro projeto, sem relação, que também instala um comando `framelift`, então não
+instale os dois no mesmo ambiente.
 
-**Opcional, para hardware Intel:** `pip install "framelift[intel]"` instala o
+**Opcional, para hardware Intel:** `pip install "framelift-video[intel]"` instala o
 [OpenVINO](https://docs.openvino.ai), que permite rodar a IA numa GPU Intel (Iris, UHD,
 Arc) com `--device igpu`, ou na CPU com `--backend openvino` (muitas vezes mais rápido que o
 PyTorch, em qualquer CPU x86). Com ele instalado, o `framelift tune` testa as duas opções.
@@ -190,7 +193,7 @@ instale o [VLC media player](https://www.videolan.org/vlc/) (64 bits se o seu Py
 64 bits) e a biblioteca Python dele:
 
 ```bash
-pip install "framelift[picker]"     # instala o python-vlc
+pip install "framelift-video[picker]"     # instala o python-vlc
 ```
 
 No Linux, o Tkinter também pode precisar de `sudo apt install python3-tk`. Todo o resto

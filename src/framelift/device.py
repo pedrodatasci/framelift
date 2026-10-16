@@ -18,8 +18,8 @@ DEFAULT_CPU_THREADS = torch.get_num_threads()
 """PyTorch's own choice of CPU threads, before anything changes it."""
 
 INSTALL_OPENVINO = (
-    'pip install openvino   (or: pip install -e ".[intel]"), and keep the Intel graphics '
-    "driver up to date"
+    'pip install openvino   (or: pip install "framelift-video[intel]"), and keep the Intel '
+    "graphics driver up to date"
 )
 
 
@@ -136,14 +136,14 @@ def current_cpu_threads() -> int:
     return torch.get_num_threads()
 
 
-def synchronize(device: Device) -> None:
+def synchronize(device: Device | None) -> None:
     """Wait for queued GPU work to finish, so timings measure real work."""
-    if device.is_cuda and torch.cuda.is_available():
+    if device is not None and device.is_cuda and torch.cuda.is_available():
         torch.cuda.synchronize(device.gpu_id)
 
 
-def release_memory(device: Device) -> None:
+def release_memory(device: Device | None) -> None:
     """Run Python's GC and give cached GPU memory back to the driver."""
     gc.collect()
-    if device.is_cuda and torch.cuda.is_available():
+    if device is not None and device.is_cuda and torch.cuda.is_available():
         torch.cuda.empty_cache()
