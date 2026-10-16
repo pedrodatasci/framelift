@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 import numpy as np
@@ -78,8 +79,6 @@ def test_without_the_ai_nvenc_is_simply_tried(monkeypatch):
 
 def _fake_program(folder, name):
     """An empty executable that ``shutil.which`` will find."""
-    import os
-
     folder.mkdir(exist_ok=True)
     path = folder / (name + ".exe" if os.name == "nt" else name)
     path.write_text("")
@@ -92,12 +91,15 @@ def test_ffmpeg_folder_from_the_environment(tmp_path, monkeypatch):
     folder.parent.mkdir()
     ffmpeg, ffprobe = _fake_program(folder, "ffmpeg"), _fake_program(folder, "ffprobe")
 
+    def same(found, expected):  # Windows may answer "ffmpeg.EXE" for "ffmpeg.exe"
+        return os.path.samefile(found, expected)
+
     monkeypatch.setenv("FRAMELIFT_FFMPEG", str(folder))
-    assert encoder.find_binary("ffmpeg") == str(ffmpeg)
-    assert encoder.find_binary("ffprobe") == str(ffprobe)
+    assert same(encoder.find_binary("ffmpeg"), ffmpeg)
+    assert same(encoder.find_binary("ffprobe"), ffprobe)
     # Pointing at ffmpeg itself works too: its folder is used.
     monkeypatch.setenv("FRAMELIFT_FFMPEG", str(ffmpeg))
-    assert encoder.find_binary("ffprobe") == str(ffprobe)
+    assert same(encoder.find_binary("ffprobe"), ffprobe)
 
 
 def test_ffmpeg_folder_without_the_program_says_so(tmp_path, monkeypatch):

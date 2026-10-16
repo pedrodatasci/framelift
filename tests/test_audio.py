@@ -142,7 +142,8 @@ def test_parts_can_be_joined_without_losing_sync(source, tmp_path):
     add_audio(second, source, 1.5, 1.5)
 
     parts = tmp_path / "parts.txt"
-    parts.write_text(f"file '{first.as_posix()}'\nfile '{second.as_posix()}'\n")
+    # FFmpeg reads the list as UTF-8, whatever the system's encoding (paths like "Pedro Sá").
+    parts.write_text(f"file '{first.as_posix()}'\nfile '{second.as_posix()}'\n", encoding="utf-8")
     joined = tmp_path / "joined.mp4"
     _ffmpeg("-f", "concat", "-safe", "0", "-i", str(parts), "-c", "copy", str(joined))
 
