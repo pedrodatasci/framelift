@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -29,13 +30,59 @@ ENCODER_LABELS = {"cpu": "libx264 (CPU)", "nvenc": "h264_nvenc (NVIDIA)"}
 # -- environment checks --------------------------------------------------------
 
 
+FFMPEG_ENV = "FRAMELIFT_FFMPEG"
+"""Environment variable with the folder of ``ffmpeg`` and ``ffprobe`` (or the path of
+``ffmpeg`` itself), for an FFmpeg that isn't on the PATH."""
+
+
+def find_binary(name: str) -> str:
+    """The full path of an FFmpeg program, ``"ffmpeg"`` or ``"ffprobe"``.
+
+    Looked up in the folder that ``FRAMELIFT_FFMPEG`` points at, if it's set, otherwise on
+    the PATH. Raises :class:`MissingDependencyError`, saying how to install FFmpeg on this
+    system, if it isn't there.
+    """
+    configured = os.environ.get(FFMPEG_ENV)
+    if configured:
+        place = Path(configured).expanduser()
+        if not place.exists():
+            raise MissingDependencyError(
+                f"{FFMPEG_ENV} is set to {configured}, which doesn't exist. Point it at the "
+                f"folder that has ffmpeg and ffprobe, or unset it to use the ones on your PATH."
+            )
+        folder = place if place.is_dir() else place.parent
+        found = shutil.which(name, path=str(folder))
+        if found is None:
+            raise MissingDependencyError(
+                f"{FFMPEG_ENV} is set to {configured}, but there's no '{name}' in {folder}. "
+                f"Point it at the folder that has both ffmpeg and ffprobe, or unset it to use "
+                f"the ones on your PATH."
+            )
+        return found
+
+    found = shutil.which(name)
+    if found is None:
+        raise MissingDependencyError(f"Couldn't find '{name}' on your PATH. {_install_hint()}")
+    return found
+
+
 def require_binary(name: str) -> None:
-    """Fail early, with a clear message, if ``name`` isn't on the PATH."""
-    if shutil.which(name) is None:
-        raise MissingDependencyError(
-            f"Couldn't find '{name}' on your PATH. "
-            f"Install it (https://ffmpeg.org/download.html) and try again."
-        )
+    """Fail early, with a clear message, if ``name`` can't be found (see :func:`find_binary`)."""
+    find_binary(name)
+
+
+def _install_hint() -> str:
+    if sys.platform == "win32":
+        how = "winget install Gyan.FFmpeg      (then open a new terminal)"
+    elif sys.platform == "darwin":
+        how = "brew install ffmpeg"
+    else:
+        how = "sudo apt install ffmpeg      (Debian/Ubuntu; elsewhere, your package manager)"
+    return (
+        f"framelift needs FFmpeg (ffmpeg and ffprobe). Install it with:\n  {how}\n"
+        f"or from https://ffmpeg.org/download.html. If it's already installed but not on "
+        f"your PATH, set {FFMPEG_ENV} to its folder."
+    )
 
 
 def format_command(command: Sequence[object]) -> str:
@@ -46,7 +93,7 @@ def format_command(command: Sequence[object]) -> str:
 def nvenc_available() -> bool:
     """Try encoding one tiny frame with NVENC to see if it really works here."""
     command = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        find_binary("ffmpeg"), "-hide_banner", "-loglevel", "error",
         "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=1",
         "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-",
     ]  # fmt: skip
@@ -68,8 +115,12 @@ def nvenc_available() -> bool:
     return False
 
 
-def select_encoder(requested: str, device_kind: str) -> str:
-    """Pick the encoder that will actually be used, falling back to CPU when needed."""
+def select_encoder(requested: str, device_kind: str | None) -> str:
+    """Pick the encoder that will actually be used, falling back to CPU when needed.
+
+    ``device_kind`` is where the AI runs, or ``None`` without the AI (``--no-ai``), in
+    which case NVENC is simply tried.
+    """
     if requested not in ENCODER_LABELS:
         raise ValueError(f"encoder must be one of {', '.join(ENCODER_LABELS)}")
 
@@ -189,7 +240,7 @@ class FFmpegWriter:
 
     def _start(self, width: int, height: int) -> subprocess.Popen:
         command = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+            find_binary("ffmpeg"), "-y", "-hide_banner", "-loglevel", "warning",
             # Input: raw BGR frames on stdin, exactly as OpenCV holds them.
             "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "bgr24",
             "-s", f"{width}x{height}", "-r", str(self.fps), "-i", "pipe:0",

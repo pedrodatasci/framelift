@@ -148,7 +148,17 @@ checagem de frame preto também é pulada, porque ela existe para pegar problema
 ## Instalação
 
 Você precisa de **Python 3.9+** e do **[FFmpeg](https://ffmpeg.org/download.html)** no
-`PATH` (o comando `ffmpeg -version` precisa funcionar no terminal).
+`PATH` (o comando `ffmpeg -version` precisa funcionar no terminal). O jeito mais rápido de
+instalar:
+
+| Sistema | Comando |
+|---|---|
+| Windows | `winget install Gyan.FFmpeg`, depois abra um terminal novo |
+| macOS | `brew install ffmpeg` |
+| Debian / Ubuntu | `sudo apt install ffmpeg` |
+
+Se o FFmpeg estiver numa pasta fora do `PATH`, defina a variável de ambiente
+`FRAMELIFT_FFMPEG` com essa pasta (a que tem o `ffmpeg` e o `ffprobe`).
 
 ```bash
 git clone https://github.com/pedrodatasci/framelift.git
@@ -851,8 +861,9 @@ trilha de áudio, o framelift avisa. Se algo falhou ao adicionar o áudio, ele m
 aviso; rode de novo com `-v` para ver o erro do FFmpeg. O framelift também precisa do
 `ffprobe`, que vem junto com o FFmpeg, para ler o áudio.
 
-**`Couldn't find 'ffmpeg' on your PATH`**: instale o FFmpeg e abra um terminal novo. No
-Windows, adicione ao `PATH` a pasta que contém o `ffmpeg.exe`.
+**`Couldn't find 'ffmpeg' on your PATH`**: instale o FFmpeg (a mensagem diz como, para
+o seu sistema) e abra um terminal novo. Se ele estiver numa pasta fora do `PATH`, defina
+`FRAMELIFT_FFMPEG` com essa pasta.
 
 **`You asked for --device cuda, but PyTorch can't see a CUDA GPU`**: ou não há GPU NVIDIA
 (use `--device cpu`), ou o PyTorch instalado é a versão só para CPU. Confira com

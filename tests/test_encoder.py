@@ -3,6 +3,7 @@ import subprocess
 import numpy as np
 import pytest
 
+from framelift import encoder
 from framelift.encoder import FFmpegWriter, codec_arguments, format_command, temp_path_for
 from framelift.errors import EncodingError
 
@@ -64,3 +65,66 @@ def test_odd_dimensions_are_made_even(tmp_path):
     for _ in range(3):
         writer.write(np.full((47, 63, 3), 90, np.uint8))
     assert _count_frames(writer.finish()) == 3
+
+
+def test_without_the_ai_nvenc_is_simply_tried(monkeypatch):
+    """--no-ai has no device to go by: NVENC is probed, with the usual fallback."""
+    monkeypatch.setattr(encoder, "nvenc_available", lambda: True)
+    assert encoder.select_encoder("nvenc", None) == "nvenc"
+    assert encoder.select_encoder("cpu", None) == "cpu"
+    monkeypatch.setattr(encoder, "nvenc_available", lambda: False)
+    assert encoder.select_encoder("nvenc", None) == "cpu"
+
+
+def _fake_program(folder, name):
+    """An empty executable that ``shutil.which`` will find."""
+    import os
+
+    folder.mkdir(exist_ok=True)
+    path = folder / (name + ".exe" if os.name == "nt" else name)
+    path.write_text("")
+    path.chmod(0o755)
+    return path
+
+
+def test_ffmpeg_folder_from_the_environment(tmp_path, monkeypatch):
+    folder = tmp_path / "ffmpeg-7" / "bin"
+    folder.parent.mkdir()
+    ffmpeg, ffprobe = _fake_program(folder, "ffmpeg"), _fake_program(folder, "ffprobe")
+
+    monkeypatch.setenv("FRAMELIFT_FFMPEG", str(folder))
+    assert encoder.find_binary("ffmpeg") == str(ffmpeg)
+    assert encoder.find_binary("ffprobe") == str(ffprobe)
+    # Pointing at ffmpeg itself works too: its folder is used.
+    monkeypatch.setenv("FRAMELIFT_FFMPEG", str(ffmpeg))
+    assert encoder.find_binary("ffprobe") == str(ffprobe)
+
+
+def test_ffmpeg_folder_without_the_program_says_so(tmp_path, monkeypatch):
+    from framelift.errors import MissingDependencyError
+
+    monkeypatch.setenv("FRAMELIFT_FFMPEG", str(tmp_path))
+    with pytest.raises(MissingDependencyError, match="FRAMELIFT_FFMPEG is set to"):
+        encoder.find_binary("ffprobe")
+
+
+@pytest.mark.parametrize(("platform", "hint"), [("win32", "winget install Gyan.FFmpeg"),
+                                                ("darwin", "brew install ffmpeg"),
+                                                ("linux", "sudo apt install ffmpeg")])  # fmt: skip
+def test_missing_ffmpeg_says_how_to_install_it(monkeypatch, platform, hint):
+    from framelift.errors import MissingDependencyError
+
+    monkeypatch.delenv("FRAMELIFT_FFMPEG", raising=False)
+    monkeypatch.setattr(encoder.shutil, "which", lambda name, path=None: None)
+    monkeypatch.setattr(encoder.sys, "platform", platform)
+    with pytest.raises(MissingDependencyError, match="Couldn't find 'ffmpeg'") as error:
+        encoder.find_binary("ffmpeg")
+    assert hint in str(error.value) and "FRAMELIFT_FFMPEG" in str(error.value)
+
+
+def test_ffmpeg_folder_that_does_not_exist_says_so(tmp_path, monkeypatch):
+    from framelift.errors import MissingDependencyError
+
+    monkeypatch.setenv("FRAMELIFT_FFMPEG", str(tmp_path / "nowhere"))
+    with pytest.raises(MissingDependencyError, match="which doesn't exist"):
+        encoder.find_binary("ffmpeg")

@@ -31,7 +31,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from .encoder import format_command, require_binary, temp_path_for
+from .encoder import find_binary, format_command, require_binary, temp_path_for
 from .errors import EncodingError, InvalidOptionError, VideoReadError
 from .video import VideoInfo, probe_video
 
@@ -228,7 +228,7 @@ def _cut(mode, source, target, offset, frame_range, fps, audio, show_progress) -
 
 def _cut_command(mode, source, target, offset, frame_range, fps, pixel_format, audio):
     frames = frame_range.frames
-    command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats",
+    command = [find_binary("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error", "-nostats",
                "-progress", "pipe:1"]  # fmt: skip
 
     if mode == "seek":
@@ -266,7 +266,10 @@ def _cut_command(mode, source, target, offset, frame_range, fps, pixel_format, a
 def _passthrough() -> tuple[str, ...]:
     """``-fps_mode passthrough``, spelled ``-vsync passthrough`` before FFmpeg 5.1."""
     help_text = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-h", "full"], capture_output=True, text=True, errors="replace"
+        [find_binary("ffmpeg"), "-hide_banner", "-h", "full"],
+        capture_output=True,
+        text=True,
+        errors="replace",
     ).stdout
     return ("-fps_mode", "passthrough") if "-fps_mode" in help_text else ("-vsync", "passthrough")
 
@@ -291,7 +294,7 @@ def _run_with_progress(command: list[str], frames: int, show_progress: bool) -> 
 def _probe_streams(path: Path) -> dict:
     """When the file and its first video stream start, and whether there's audio."""
     result = subprocess.run(
-        ["ffprobe", "-v", "error", "-print_format", "json",
+        [find_binary("ffprobe"), "-v", "error", "-print_format", "json",
          "-show_entries", "format=start_time:stream=codec_type,start_time", str(path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )  # fmt: skip

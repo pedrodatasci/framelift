@@ -146,7 +146,16 @@ skipped too, since it's there to catch problems with the AI.
 ## Installation
 
 You need **Python 3.9+** and **[FFmpeg](https://ffmpeg.org/download.html)** available
-on your `PATH` (`ffmpeg -version` should work in a terminal).
+on your `PATH` (`ffmpeg -version` should work in a terminal). The quickest way to get it:
+
+| System | Command |
+|---|---|
+| Windows | `winget install Gyan.FFmpeg`, then open a new terminal |
+| macOS | `brew install ffmpeg` |
+| Debian / Ubuntu | `sudo apt install ffmpeg` |
+
+If FFmpeg is somewhere that isn't on the `PATH`, set the `FRAMELIFT_FFMPEG` environment
+variable to its folder (the one with `ffmpeg` and `ffprobe`).
 
 ```bash
 git clone https://github.com/pedrodatasci/framelift.git
@@ -840,8 +849,9 @@ no audio track, framelift says so. If adding the audio failed, it prints a warni
 again with `-v` to see FFmpeg's error. framelift also needs `ffprobe`, which comes with
 FFmpeg, to read the audio.
 
-**`Couldn't find 'ffmpeg' on your PATH`** — Install FFmpeg and open a new terminal.
-On Windows, add the folder containing `ffmpeg.exe` to `PATH`.
+**`Couldn't find 'ffmpeg' on your PATH`** — Install FFmpeg (the message says how for
+your system) and open a new terminal. If it's installed in a folder that isn't on the
+`PATH`, set `FRAMELIFT_FFMPEG` to that folder instead.
 
 **`You asked for --device cuda, but PyTorch can't see a CUDA GPU`** — Either there's no
 NVIDIA GPU (use `--device cpu`), or you have the CPU-only PyTorch build. Check with

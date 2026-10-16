@@ -6,7 +6,6 @@ import subprocess
 import numpy as np
 import pytest
 
-from framelift import audio as audio_module
 from framelift.audio import add_audio, probe_audio
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg not installed")
@@ -105,7 +104,9 @@ def test_input_without_audio(source, tmp_path):
 def test_missing_ffprobe_keeps_the_silent_video(source, tmp_path, monkeypatch):
     video = _silent_part(source, tmp_path, 0, 2.0)
     before = video.read_bytes()
-    monkeypatch.setattr(audio_module.shutil, "which", lambda name: None)
+    # FFmpeg "installed" in a folder without ffprobe.
+    (tmp_path / "no-ffprobe-here").mkdir()
+    monkeypatch.setenv("FRAMELIFT_FFMPEG", str(tmp_path / "no-ffprobe-here"))
 
     assert add_audio(video, source, 0.0, 2.0) == "failed"
     assert video.read_bytes() == before

@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from .encoder import find_binary
+from .errors import MissingDependencyError
 
 log = logging.getLogger(__name__)
 
@@ -46,11 +48,13 @@ def probe_audio(path: str | Path) -> AudioInfo | None:
 
     Raises ``FileNotFoundError`` if ffprobe (which ships with FFmpeg) is missing.
     """
-    if shutil.which("ffprobe") is None:
-        raise FileNotFoundError("ffprobe")
+    try:
+        ffprobe = find_binary("ffprobe")
+    except MissingDependencyError:
+        raise FileNotFoundError("ffprobe") from None
 
     result = subprocess.run(
-        ["ffprobe", "-v", "error", "-print_format", "json",
+        [ffprobe, "-v", "error", "-print_format", "json",
          "-show_entries", "format=start_time:stream=codec_type,codec_name,start_time", str(path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )  # fmt: skip
@@ -106,7 +110,7 @@ def add_audio(video: Path, source: Path, start_seconds: float, duration_seconds:
 
         for outcome, audio_codec in attempts:
             command = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                find_binary("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
                 "-i", str(video),
                 "-itsoffset", f"{delay:.6f}", "-i", str(segment),
                 "-map", "0:v:0", "-map", "1:a", "-c:v", "copy", *audio_codec,
@@ -136,7 +140,7 @@ def _extract_segment(source: Path, segment: Path, start: float, duration: float)
     which is the delay to apply when muxing; ``None`` if there's no audio there.
     """
     command = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        find_binary("ffmpeg"), "-y", "-hide_banner", "-loglevel", "error",
         # -copyts keeps the source's clock, so -ss/-t below mean the same instants
         # as the video frames, even in files whose clock doesn't start at 0.
         "-copyts", "-i", str(source), "-vn", "-map", "0:a",
@@ -146,7 +150,8 @@ def _extract_segment(source: Path, segment: Path, start: float, duration: float)
         return None
 
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "packet=pts_time",
+        [find_binary("ffprobe"), "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "packet=pts_time",
          "-read_intervals", "%+#1", "-of", "csv=p=0", str(segment)],
         capture_output=True, text=True, errors="replace",
     )  # fmt: skip

@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-10-15
+
+### Added
+
+- **`FRAMELIFT_FFMPEG`**: an environment variable with the folder of `ffmpeg` and
+  `ffprobe` (or the path of `ffmpeg` itself), for an FFmpeg that isn't on the `PATH`.
+  It's used for every FFmpeg call: encoding, audio, `framelift trim` and the NVENC check.
+- `framelift.encoder.find_binary()` returns the full path framelift will use.
+
+### Changed
+
+- **When FFmpeg is missing, the message says how to install it on your system**:
+  `winget install Gyan.FFmpeg` on Windows, `brew install ffmpeg` on macOS,
+  `sudo apt install ffmpeg` on Debian/Ubuntu. The README's installation section lists the
+  same commands.
+
+### Not changed, on purpose
+
+- FFmpeg is still installed separately rather than bundled through pip. The package that
+  bundles it (`imageio-ffmpeg`) has no `ffprobe`, which framelift relies on for the exact
+  start times that keep the audio in sync and the trims frame-accurate; replacing it would
+  mean parsing FFmpeg's text output, more fragile than a one-line install.
+
+### Compatibility
+
+- Every flag, default, API and output from 1.2 is unchanged.
+
 ## [1.2.0] — 2026-10-15
 
 ### Added
